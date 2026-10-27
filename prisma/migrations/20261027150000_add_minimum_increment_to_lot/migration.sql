@@ -1,0 +1,2 @@
+ALTER TABLE "Lot"
+ADD COLUMN "minimumIncrement" DECIMAL(12, 2) NOT NULL DEFAULT 1.00;

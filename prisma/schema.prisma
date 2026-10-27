@@ -1,0 +1,191 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  AUCTIONEER // Leiloeiro: pessoa responsável por conduzir e gerenciar leilões
+  BIDDER // Licitante: pessoa que participa oferecendo lances
+  ADMIN // Administrador: pessoa que gerencia o sistema
+}
+
+enum AuctionStatus {
+  DRAFT // Rascunho: leilão ainda não publicado
+  SCHEDULED // Agendado: leilão programado para começar
+  ACTIVE // Ativo: leilão em andamento
+  FINISHED // Finalizado: leilão encerrado
+  CANCELLED // Cancelado: leilão que foi interrompido ou anulado
+}
+
+enum LotStatus {
+  AVAILABLE // Disponível: lote disponível para participar de um leilão
+  IN_AUCTION // Em leilão: lote que está recebendo lances
+  SOLD // Vendido: lote arrematado por um participante
+  UNSOLD // Não vendido: lote encerrado sem arrematação
+  CANCELLED // Cancelado: lote retirado do leilão
+}
+
+enum BidStatus {
+  ACCEPTED // Aceito: lance validado e registrado pelo sistema
+  REJECTED // Rejeitado: lance recusado pelo sistema
+  CANCELLED // Cancelado: lance invalidado ou cancelado
+}
+
+enum WalletTransactionType {
+  DEPOSIT // Depósito: entrada de dinheiro na carteira
+  WITHDRAWAL // Retirada: saída de dinheiro da carteira
+  BID_RESERVATION // Reserva de lance: saldo reservado para cobrir um lance
+  BID_RELEASE // Liberação de lance: saldo reservado que voltou a ficar disponível
+  AUCTION_PAYMENT // Pagamento do leilão: pagamento do valor de uma arrematação
+  AUCTION_EARNING // Crédito recebido pelo leiloeiro após uma arrematação
+  AUCTION_REFUND // Reembolso do leilão: devolução de dinheiro ao participante
+}
+
+// Profile = Perfil: guarda os dados do usuário no sistema
+model Profile {
+  auctions     Auction[] @relation("AuctioneerAuctions")
+  id           String    @id @default(uuid()) @db.Uuid // Identificador único do perfil
+  name         String // Nome do usuário
+  email        String    @unique // E-mail único do usuário
+  role         UserRole  @default(BIDDER) // Papel do usuário no sistema
+  createdAt    DateTime  @default(now()) // Data de criação do cadastro
+  updatedAt    DateTime  @updatedAt // Data da última atualização
+  passwordHash String
+
+  wallet Wallet? // Wallet = Carteira: carteira do usuário, se já existir
+  bids   Bid[] // Bids = Lances: lista de lances feitos pelo usuário
+}
+
+// Auction = Leilão: representa o evento de leilão
+model Auction {
+  auctioneerId String?       @db.Uuid
+  auctioneer   Profile?      @relation("AuctioneerAuctions", fields: [auctioneerId], references: [id], onDelete: Restrict)
+  id           String        @id @default(uuid()) @db.Uuid // Identificador único do leilão
+  title        String // Título do leilão
+  description  String? // Descrição opcional do leilão
+  status       AuctionStatus @default(DRAFT) // Status = Situação atual do leilão
+  startsAt     DateTime // Começa em: data e hora de início
+  endsAt       DateTime // Termina em: data e hora prevista para encerrar
+  createdAt    DateTime      @default(now()) // Data de criação do leilão
+  updatedAt    DateTime      @updatedAt // Data da última atualização
+
+  lots Lot[] // Lots = Lotes: itens que pertencem a este leilão
+
+  @@index([auctioneerId])
+}
+
+// Lot = Lote: representa um item colocado à venda
+model Lot {
+  id               String    @id @default(uuid()) @db.Uuid // Identificador único do lote
+  auctionId        String    @db.Uuid // ID do leilão ao qual o lote pertence
+  title            String // Título ou nome do item
+  description      String? // Descrição opcional do item
+  imageUrl         String? // URL = endereço da imagem do item
+  externalId       String? // ID externo: identificador do item na API externa
+  startingBid      Decimal   @db.Decimal(12, 2) // Lance inicial: valor mínimo para começar
+  minimumIncrement Decimal   @default(1.00) @db.Decimal(12, 2) // Incremento mínimo entre lances
+  currentBid       Decimal?  @db.Decimal(12, 2) // Lance atual: maior valor ofertado até agora
+  endsAt           DateTime // Data de encerramento deste lote; pode ser prorrogada por lances
+  status           LotStatus @default(AVAILABLE) // Situação atual do lote
+  bidAuditHead     String?   @db.VarChar(64) // Hash mais recente da cadeia pública de lances
+  bidAuditCount    Int       @default(0) // Quantidade de lances cobertos pela cadeia
+  createdAt        DateTime  @default(now()) // Data de criação do lote
+  updatedAt        DateTime  @updatedAt // Data da última atualização
+
+  auction Auction         @relation(fields: [auctionId], references: [id]) // Auction = leilão ao qual pertence
+  bids    Bid[] // Bids = histórico de lances recebidos pelo lote
+  receipt AuctionReceipt? // Receipt = comprovante do resultado, se existir
+
+  @@index([auctionId, status]) // Índice: ajuda a buscar lotes por leilão e situação
+}
+
+// Bid = Lance: registra uma oferta feita por um participante
+model Bid {
+  id                String    @id @default(uuid()) @db.Uuid // Identificador único do lance
+  lotId             String    @db.Uuid // ID do lote que recebeu o lance
+  bidderId          String    @db.Uuid // ID do licitante que fez o lance
+  amount            Decimal   @db.Decimal(12, 2) // Valor oferecido no lance
+  status            BidStatus @default(ACCEPTED) // Situação do lance
+  createdAt         DateTime  @default(now()) // Data e hora em que o lance foi feito
+  auditSequence     Int?
+  auditPreviousHash String?   @db.VarChar(64)
+  auditHash         String?   @db.VarChar(64)
+
+  lot    Lot     @relation(fields: [lotId], references: [id]) // Lote relacionado ao lance
+  bidder Profile @relation(fields: [bidderId], references: [id]) // Licitante que fez o lance
+
+  @@unique([lotId, auditSequence])
+  @@index([lotId, createdAt]) // Índice: facilita consultar os lances de um lote
+  @@index([bidderId, createdAt]) // Índice: facilita consultar os lances de um licitante
+}
+
+// Wallet = Carteira: guarda os saldos financeiros do usuário
+model Wallet {
+  id               String   @id @default(uuid()) @db.Uuid // Identificador único da carteira
+  profileId        String   @unique @db.Uuid // ID do perfil dono da carteira
+  availableBalance Decimal  @default(0) @db.Decimal(12, 2) // Saldo disponível para usar
+  committedBalance Decimal  @default(0) @db.Decimal(12, 2) // Saldo comprometido ou reservado
+  createdAt        DateTime @default(now()) // Data de criação da carteira
+  updatedAt        DateTime @updatedAt // Data da última atualização
+
+  profile      Profile             @relation(fields: [profileId], references: [id]) // Dono da carteira
+  transactions WalletTransaction[] // Transactions = movimentações financeiras da carteira
+}
+
+// WalletTransaction = Transação da carteira: registra entradas e saídas de saldo
+model WalletTransaction {
+  id          String                @id @default(uuid()) @db.Uuid // Identificador da movimentação
+  walletId    String                @db.Uuid // ID da carteira movimentada
+  type        WalletTransactionType // Tipo da movimentação
+  amount      Decimal               @db.Decimal(12, 2) // Valor da movimentação
+  description String? // Descrição opcional da movimentação
+  referenceId String?               @db.Uuid // ID de referência, como o lance relacionado
+  createdAt   DateTime              @default(now()) // Data e hora da movimentação
+
+  wallet Wallet @relation(fields: [walletId], references: [id]) // Carteira relacionada à movimentação
+
+  @@index([walletId, createdAt]) // Índice: facilita consultar o extrato da carteira
+}
+
+// AuctionReceipt = Comprovante do leilão: guarda o resultado da venda do lote
+model AuctionReceipt {
+  id             String     @id @default(uuid()) @db.Uuid // Identificador único do comprovante
+  lotId          String     @unique @db.Uuid // ID do lote; só pode ter um comprovante por lote
+  winnerId       String?    @db.Uuid // ID do vencedor, se houver
+  finalAmount    Decimal    @db.Decimal(12, 2) // Valor final da arrematação
+  result         LotStatus?
+  lotTitle       String?
+  lotDescription String?
+  lotImageUrl    String?
+  startingBid    Decimal?   @db.Decimal(12, 2)
+  auctionTitle   String?
+  bidHistoryHash String?    @db.VarChar(64) // Hash final da cadeia de lances, se disponível
+  bidCount       Int? // Quantidade total de lances no momento do comprovante
+  bidAuditCount  Int? // Quantidade de lances cobertos pela cadeia
+  issuedAt       DateTime   @default(now()) // Data e hora de emissão do comprovante
+
+  lot Lot @relation(fields: [lotId], references: [id]) // Lote ao qual o comprovante pertence
+}
+
+// AuditLog = Registro de auditoria: guarda eventos para verificar a integridade dos dados
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid // Identificador único do registro de auditoria
+  entityType   String // Tipo da entidade alterada, como Lot ou Bid
+  entityId     String   @db.Uuid // ID do registro afetado
+  action       String // Ação realizada, como criação ou atualização
+  payload      Json // Dados do evento em formato JSON
+  previousHash String? // Hash = resumo criptográfico do evento anterior
+  currentHash  String // Hash = resumo criptográfico deste evento
+  createdAt    DateTime @default(now()) // Data e hora do evento de auditoria
+
+  @@index([entityType, entityId, createdAt]) // Índice: facilita buscar eventos de uma entidade
+}
