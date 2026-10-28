@@ -31,6 +31,56 @@ export class BidsService {
     private readonly bidsGateway: BidsGateway,
   ) {}
 
+  async findMyWins(bidderId: string) {
+    const receipts = await this.prisma.auctionReceipt.findMany({
+      where: { winnerId: bidderId },
+      orderBy: [{ issuedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        lotId: true,
+        finalAmount: true,
+        result: true,
+        issuedAt: true,
+        lotTitle: true,
+        lotDescription: true,
+        lotImageUrl: true,
+        startingBid: true,
+        auctionTitle: true,
+        lot: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            imageUrl: true,
+            startingBid: true,
+            auction: { select: { id: true, title: true } },
+          },
+        },
+      },
+    });
+
+    return receipts.map((receipt) => ({
+      receiptId: receipt.id,
+      sharePath: `/lots/${receipt.lotId}/receipt`,
+      issuedAt: receipt.issuedAt,
+      result: receipt.result ?? LotStatus.SOLD,
+      finalAmount: receipt.finalAmount.toFixed(2),
+      lot: {
+        id: receipt.lot.id,
+        title: receipt.lotTitle ?? receipt.lot.title,
+        description: receipt.lotDescription ?? receipt.lot.description,
+        imageUrl: receipt.lotImageUrl ?? receipt.lot.imageUrl,
+        startingBid: (receipt.startingBid ?? receipt.lot.startingBid).toFixed(
+          2,
+        ),
+      },
+      auction: {
+        id: receipt.lot.auction.id,
+        title: receipt.auctionTitle ?? receipt.lot.auction.title,
+      },
+    }));
+  }
+
   async create(bidderId: string, createBidDto: CreateBidDto) {
     const amount = new Prisma.Decimal(createBidDto.amount);
 

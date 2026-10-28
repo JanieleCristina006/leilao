@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { UserRole } from '../../generated/prisma/enums.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -13,6 +13,13 @@ type AuthenticatedRequest = {
 @Controller('bids')
 export class BidsController {
   constructor(private readonly bidsService: BidsService) {}
+
+  @Get('me/wins')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BIDDER)
+  findMyWins(@Req() request: AuthenticatedRequest) {
+    return this.bidsService.findMyWins(request.user.userId);
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)

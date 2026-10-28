@@ -70,7 +70,7 @@ Instale as dependências:
 npm install
 ```
 
-Crie um arquivo `.env` na raiz com as variáveis do exemplo acima. Gere o `JWT_SECRET` conforme indicado na seção de variáveis e substitua os dados de conexão do PostgreSQL pelos valores do seu ambiente.
+Copie `.env.example` para `.env` na raiz do projeto e ajuste as conexões do PostgreSQL. No PowerShell, use `Copy-Item .env.example .env`; em macOS/Linux, use `cp .env.example .env`. Gere e configure seu próprio `JWT_SECRET` conforme indicado na seção de variáveis; não use o valor de exemplo em um ambiente compartilhado.
 
 A configuração do Prisma está em `prisma7.config.ts`, nome diferente do padrão. Por isso, informe esse arquivo ao executar comandos do Prisma.
 
@@ -175,6 +175,7 @@ Exemplo:
 | `POST`                      | `/auth/login`                           | Público; retorna token JWT.                                                 |
 | `GET`                       | `/auth/me`                              | Requer token JWT.                                                           |
 | `POST`                      | `/bids`                                 | Requer papel `BIDDER`; registra um lance válido.                            |
+| `GET`                       | `/bids/me/wins`                         | Requer papel `BIDDER`; lista os arremates do licitante autenticado.         |
 | `GET`                       | `/wallet/me`                            | Requer papel `BIDDER` ou `AUCTIONEER`; mostra o saldo da própria carteira.  |
 | `GET`                       | `/wallet/me/transactions`               | Requer papel `BIDDER` ou `AUCTIONEER`; mostra o extrato próprio.            |
 | `POST`                      | `/wallet/deposits`                      | Requer papel `BIDDER`; faz um depósito simulado.                            |
@@ -284,9 +285,37 @@ O depósito é simulado: não movimenta dinheiro real e aumenta somente o saldo 
 
 ### Lances
 
-| Método | Rota    | Acesso                             |
-| ------ | ------- | ---------------------------------- |
-| `POST` | `/bids` | Requer token JWT e papel `BIDDER`. |
+| Método | Rota            | Acesso                                                                                  |
+| ------ | --------------- | --------------------------------------------------------------------------------------- |
+| `POST` | `/bids`          | Requer token JWT e papel `BIDDER`.                                                      |
+| `GET`  | `/bids/me/wins`  | Requer token JWT e papel `BIDDER`; lista os lotes arrematados pela pessoa autenticada. |
+
+Consulte os arremates concluídos com `GET /bids/me/wins`. A rota usa o usuário do token, não recebe `bidderId` e retorna os comprovantes do mais recente para o mais antigo. Cada item inclui o valor final, a data do arremate e os dados do lote e do leilão. A resposta é uma lista vazia quando a pessoa ainda não tem arremates.
+
+Exemplo de resposta:
+
+```json
+[
+  {
+    "receiptId": "UUID_DO_COMPROVANTE",
+    "sharePath": "/lots/UUID_DO_LOTE/receipt",
+    "issuedAt": "2026-11-15T21:00:00.000Z",
+    "result": "SOLD",
+    "finalAmount": "1250.00",
+    "lot": {
+      "id": "UUID_DO_LOTE",
+      "title": "Paisagem com árvores",
+      "description": "Obra selecionada para o leilão.",
+      "imageUrl": "https://example.com/imagem.jpg",
+      "startingBid": "1000.00"
+    },
+    "auction": {
+      "id": "UUID_DO_LEILAO",
+      "title": "Leilão de arte contemporânea"
+    }
+  }
+]
+```
 
 O corpo recebe o ID do lote e o valor como texto decimal para evitar arredondamento de dinheiro:
 
