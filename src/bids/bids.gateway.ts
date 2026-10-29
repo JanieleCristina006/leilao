@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { BidStatus, LotStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { getAllowedFrontendOrigins } from '../common/frontend-origin.js';
 import type { Server, Socket } from 'socket.io';
 
 const UUID_PATTERN =
@@ -22,7 +23,7 @@ type LiveSocket = Socket & { data: { userId?: string } };
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_ORIGIN?.split(',') ?? 'http://localhost:5173',
+    origin: getAllowedFrontendOrigins(),
   },
 })
 export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {

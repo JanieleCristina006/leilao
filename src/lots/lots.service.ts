@@ -11,6 +11,10 @@ import { UpdateLotDto } from './dto/update-lot.dto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { createBidAuditHash } from '../bids/bid-audit.utils.js';
+import {
+  getArtworkProxyUrl,
+  normalizeArtworkImageUrl,
+} from '../common/artwork-image-url.js';
 
 @Injectable()
 export class LotsService {
@@ -65,7 +69,7 @@ export class LotsService {
           artist: artwork.artist_display,
           date: artwork.date_display,
           medium: artwork.medium_display,
-          imageUrl: `${process.env.PUBLIC_API_URL ?? ''}/lots/artworks/image/${artwork.image_id}`,
+          imageUrl: getArtworkProxyUrl(artwork.image_id),
         }));
     } catch (error) {
       if (
@@ -159,7 +163,7 @@ export class LotsService {
         endsAt: auction.endsAt,
         title: createLotDto.title,
         description: createLotDto.description,
-        imageUrl: createLotDto.imageUrl,
+        imageUrl: normalizeArtworkImageUrl(createLotDto.imageUrl),
         externalId: createLotDto.externalId,
         startingBid: createLotDto.startingBid,
         ...(createLotDto.minimumIncrement !== undefined && {
@@ -169,21 +173,31 @@ export class LotsService {
     });
   }
 
-  findAll() {
-    return this.prisma.lot.findMany({
+  async findAll() {
+    const lots = await this.prisma.lot.findMany({
       orderBy: {
         createdAt: 'desc',
       },
     });
+
+    return lots.map((lot) => ({
+      ...lot,
+      imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
+    }));
   }
 
-  findMine(auctioneerId: string) {
-    return this.prisma.lot.findMany({
+  async findMine(auctioneerId: string) {
+    const lots = await this.prisma.lot.findMany({
       where: {
         auction: { is: { auctioneerId } },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return lots.map((lot) => ({
+      ...lot,
+      imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
+    }));
   }
 
   async findOne(id: string) {
@@ -195,7 +209,10 @@ export class LotsService {
       throw new NotFoundException('Lote não encontrado.');
     }
 
-    return lot;
+    return {
+      ...lot,
+      imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
+    };
   }
 
   async getPublicAudit(id: string) {
@@ -385,7 +402,9 @@ export class LotsService {
         id: lot.id,
         title: lot.receipt.lotTitle ?? lot.title,
         description: lot.receipt.lotDescription ?? lot.description,
-        imageUrl: lot.receipt.lotImageUrl ?? lot.imageUrl,
+        imageUrl: normalizeArtworkImageUrl(
+          lot.receipt.lotImageUrl ?? lot.imageUrl,
+        ),
         startingBid: (lot.receipt.startingBid ?? lot.startingBid).toFixed(2),
       },
       auction: {
@@ -487,7 +506,7 @@ export class LotsService {
       data.description = updateLotDto.description;
     }
     if (updateLotDto.imageUrl !== undefined) {
-      data.imageUrl = updateLotDto.imageUrl;
+      data.imageUrl = normalizeArtworkImageUrl(updateLotDto.imageUrl);
     }
     if (updateLotDto.externalId !== undefined) {
       data.externalId = updateLotDto.externalId;
@@ -496,13 +515,18 @@ export class LotsService {
       data.startingBid = updateLotDto.startingBid;
     }
 
-    return this.prisma.lot.update({
+    const lot = await this.prisma.lot.update({
       where: {
         id,
         auction: { is: { auctioneerId } },
       },
       data,
     });
+
+    return {
+      ...lot,
+      imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
+    };
   }
 
   async remove(id: string, auctioneerId: string) {

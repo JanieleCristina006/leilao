@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBidDto } from './dto/create-bid.dto.js';
 import { BidsGateway } from './bids.gateway.js';
 import { createBidAuditHash } from './bid-audit.utils.js';
+import { normalizeArtworkImageUrl } from '../common/artwork-image-url.js';
 
 const MAX_TRANSACTION_ATTEMPTS = 5;
 const ANTI_SNIPING_WINDOW_MS = 2 * 60 * 1000;
@@ -69,7 +70,9 @@ export class BidsService {
         id: receipt.lot.id,
         title: receipt.lotTitle ?? receipt.lot.title,
         description: receipt.lotDescription ?? receipt.lot.description,
-        imageUrl: receipt.lotImageUrl ?? receipt.lot.imageUrl,
+        imageUrl: normalizeArtworkImageUrl(
+          receipt.lotImageUrl ?? receipt.lot.imageUrl,
+        ),
         startingBid: (receipt.startingBid ?? receipt.lot.startingBid).toFixed(
           2,
         ),

@@ -489,4 +489,4 @@ Os eventos enviados pelo servidor são:
 
 Para sair de uma sala sem encerrar a conexão, envie `socket.emit('lot.leave', { lotId })`. O cronômetro deve contar localmente até o `endsAt` recebido pelo servidor; ele não deve ser usado para validar lances. O `startsAt` é do leilão e, ao criar um lote, o `endsAt` inicial é copiado do leilão. Depois, cada lote pode ter seu próprio horário de encerramento por causa do anti-sniping. O servidor confere esses horários ao processar `POST /bids`.
 
-Configure `FRONTEND_ORIGIN` com a origem permitida do frontend, por exemplo `http://localhost:5173`. Em produção, defina explicitamente as origens permitidas; várias origens podem ser separadas por vírgula.
+Configure `FRONTEND_ORIGIN` com a origem pública do frontend. Várias origens podem ser separadas por vírgula. A origem local `http://localhost:5173` também fica liberada para desenvolvimento. A mesma lista é usada pelo CORS HTTP e pelo Socket.IO.
