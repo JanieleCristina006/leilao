@@ -156,7 +156,7 @@ O cadastro público cria usuários com o papel `BIDDER`. A conta de leiloeiro de
 
 Na raiz do projeto está a coleção `rotas-api.postman_collection.json`. Importe esse arquivo pelo menu **Import** do Postman ou do Insomnia. A coleção usa `http://localhost:3000` como endereço padrão; altere a variável `baseUrl` se a API estiver em outra porta.
 
-Antes de testar as rotas de leilões e lotes, aplique as migrações do banco. Para testar as permissões, execute a pasta **1 - Cadastro público**, altere no Prisma Studio os perfis que serão leiloeiros para `AUCTIONEER` e o perfil de administrador para `ADMIN`, e depois execute **2 - Login**. As pastas seguintes usam os tokens e IDs salvos automaticamente pela coleção. O cadastro público cria somente usuários `BIDDER`. Antes dos lances, execute os depósitos simulados na subpasta **Carteira dos licitantes**, dentro da pasta **3 - Rotas públicas e teste do licitante**.
+Antes de testar as rotas de leilões e lotes, aplique as migrações do banco. Para testar as permissões, execute **1 - Cadastro público** e altere no Prisma Studio o papel de uma conta para `ADMIN` para provisionar o primeiro administrador. Faça login nessa conta, use `PATCH /users/:id/role` para definir os papéis das demais contas e faça login nelas. As pastas seguintes usam os tokens e IDs salvos automaticamente pela coleção. O cadastro público cria somente usuários `BIDDER`. Antes dos lances, execute os depósitos simulados na subpasta **Carteira dos licitantes**, dentro da pasta **3 - Rotas públicas e teste do licitante**.
 
 ### Mensagem inicial
 
@@ -171,8 +171,9 @@ Antes de testar as rotas de leilões e lotes, aplique as migrações do banco. P
 | `POST`   | `/users`     | Cadastra um usuário.                                                             |
 | `GET`    | `/users`     | Lista os usuários.                                                               |
 | `GET`    | `/users/:id` | Busca um usuário pelo ID.                                                        |
-| `PATCH`  | `/users/:id` | Atualiza parcialmente um usuário.                                                |
-| `DELETE` | `/users/:id` | Remove um usuário, desde que não haja dados relacionados que impeçam a exclusão. |
+| `PATCH`  | `/users/:id`      | Atualiza parcialmente nome, e-mail ou senha de um usuário.                       |
+| `PATCH`  | `/users/:id/role` | Altera o papel para `ADMIN`, `BIDDER` ou `AUCTIONEER`.                            |
+| `DELETE` | `/users/:id`      | Remove um usuário, desde que não haja dados relacionados que impeçam a exclusão. |
 
 Campos para `POST /users`:
 
@@ -180,7 +181,7 @@ Campos para `POST /users`:
 - `email`: e-mail válido e único.
 - `password`: senha com no mínimo 8 caracteres.
 
-O cadastro público sempre cria um licitante (`BIDDER`). O campo `role` não é aceito no corpo. Para desenvolvimento local, crie a conta pelo cadastro e altere seu campo `role` pelo Prisma Studio para `AUCTIONEER` ou `ADMIN`. A API não oferece promoção pública de papel.
+O cadastro público sempre cria um licitante (`BIDDER`) e não aceita o campo `role`. Um administrador autenticado pode mudar o papel de qualquer usuário por `PATCH /users/:id/role`, enviando `{"role":"AUCTIONEER"}`. Os valores aceitos são `ADMIN`, `BIDDER` e `AUCTIONEER`. Para criar o primeiro administrador, use um seed ou altere o papel diretamente no banco; depois disso, use a rota protegida.
 
 Exemplo:
 
@@ -205,6 +206,7 @@ Exemplo:
 | `POST`                      | `/wallet/deposits`                      | Requer papel `BIDDER`; faz um depósito simulado.                            |
 | `GET`                       | `/users` e `/users/:id`                 | Requer papel `ADMIN`.                                                       |
 | `PATCH` / `DELETE`          | `/users/:id`                            | Requer papel `ADMIN`.                                                       |
+| `PATCH`                     | `/users/:id/role`                       | Requer papel `ADMIN`; altera para `ADMIN`, `BIDDER` ou `AUCTIONEER`.         |
 | `POST` / `PATCH` / `DELETE` | `/auctions` e `/auctions/:id`           | Requer papel `AUCTIONEER`; alterações só no próprio leilão.                 |
 | `GET`                       | `/auctions/mine`                        | Requer papel `AUCTIONEER`.                                                  |
 | `POST` / `PATCH` / `DELETE` | `/lots` e `/lots/:id`                   | Requer papel `AUCTIONEER`; o lote precisa pertencer a um leilão do usuário. |
@@ -446,7 +448,7 @@ Os testes unitários usam mocks do Prisma e não abrem conexão com PostgreSQL. 
 
 ## Comportamentos conhecidos
 
-- O cadastro público sempre cria `BIDDER`. Para demonstração local, crie usuários por esse cadastro e altere o papel no Prisma Studio para `AUCTIONEER` ou `ADMIN`.
+- O cadastro público sempre cria `BIDDER`. O primeiro administrador precisa ser criado por seed ou diretamente no banco; administradores podem alterar papéis pela rota `PATCH /users/:id/role`.
 - O depósito da carteira é simulado e não movimenta dinheiro real. O valor fica comprometido enquanto o licitante lidera; um lance superado libera a reserva anterior.
 - Um lance recebido nos dois minutos finais prorroga o lote por mais dois minutos. O backend verifica o encerramento a cada cinco segundos; a contagem regressiva exibida pelo frontend é apenas visual.
 - Ao encerrar um lote com lance, o sistema liquida o valor reservado para o leiloeiro. Sem lances, fecha como `UNSOLD`, com valor final `0.00` e sem vencedor.

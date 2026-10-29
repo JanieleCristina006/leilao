@@ -16,6 +16,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 
 @Controller('users')
 export class UsersController {
@@ -48,6 +49,16 @@ export class UsersController {
     @Body() updateUserDto: UpdateUserDto,
   ) {
     return this.usersService.update(id, updateUserDto);
+  }
+
+  @Patch(':id/role')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  updateRole(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateUserRoleDto: UpdateUserRoleDto,
+  ) {
+    return this.usersService.updateRole(id, updateUserRoleDto);
   }
 
   @Delete(':id')

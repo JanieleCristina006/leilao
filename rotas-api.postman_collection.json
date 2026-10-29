@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Verzel Leilões - API",
-    "description": "Coleção para testar a API local. Use http://localhost:3000 em baseUrl. Aplique todas as migrations antes dos testes. Cadastre os usuários, ajuste os papéis no Prisma Studio e faça depósitos simulados para os licitantes antes dos lances.",
+    "description": "Coleção para testar a API local. Use http://localhost:3000 em baseUrl. Aplique todas as migrations antes dos testes. Promova a primeira conta ADMIN pelo banco, depois use a rota de papel na pasta de administrador. Faça depósitos simulados para os licitantes antes dos lances.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -168,7 +168,7 @@
     },
     {
       "name": "2 - Login",
-      "description": "Depois de cadastrar, altere os campos role pelo Prisma Studio para AUCTIONEER, AUCTIONEER e ADMIN, respectivamente. O licitante permanece como BIDDER.",
+      "description": "Depois de cadastrar, promova uma conta para ADMIN pelo Prisma Studio para provisionar o primeiro administrador. Faça login nela, use a rota Alterar papel do usuário na pasta 6 para definir os outros papéis e então faça login nas demais contas.",
       "item": [
         {
           "name": "Login licitante",
@@ -983,7 +983,7 @@
     },
     {
       "name": "6 - Rotas de administrador",
-      "description": "Use token de ADMIN. O DELETE remove permanentemente a conta indicada por bidderId; execute manualmente se quiser testar essa operação.",
+      "description": "Use token de ADMIN. O DELETE remove permanentemente a conta indicada por bidderId; execute manualmente se quiser testar essa operação. A rota de papel aceita ADMIN, BIDDER ou AUCTIONEER.",
       "item": [
         {
           "name": "Listar usuários",
@@ -1030,6 +1030,25 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/users/{{bidderId}}"
+          }
+        },
+        {
+          "name": "Alterar papel do usuário",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{adminToken}}", "type": "string" }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"AUCTIONEER\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/users/{{bidderId}}/role"
           }
         },
         {

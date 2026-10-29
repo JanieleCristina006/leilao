@@ -7,6 +7,7 @@ import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import bcrypt from 'bcrypt';
 
 @Injectable()
@@ -102,6 +103,30 @@ export class UsersService {
 
       return {
         message: 'Usuário atualizado com sucesso!',
+        updateUser,
+      };
+    } catch (error) {
+      this.handlePrismaError(error);
+    }
+  }
+
+  async updateRole(id: string, updateUserRoleDto: UpdateUserRoleDto) {
+    try {
+      const updateUser = await this.prisma.profile.update({
+        where: { id },
+        data: { role: updateUserRoleDto.role },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      return {
+        message: 'Papel do usuário atualizado com sucesso!',
         updateUser,
       };
     } catch (error) {
