@@ -138,6 +138,20 @@ npx prisma studio --config=./prisma7.config.ts
 
 As rotas não usam um prefixo global. Os corpos das requisições são enviados em JSON. A aplicação registra um `ValidationPipe` global para validar os DTOs.
 
+### Acesso de demonstração
+
+Preencha esta seção depois de criar as contas de demonstração no banco usado pela aplicação publicada. As credenciais precisam corresponder aos usuários existentes nesse banco; cadastrar usuários apenas na sua base local não os torna disponíveis no deploy.
+
+| Perfil | E-mail | Senha |
+| ------ | ------ | ----- |
+| Leiloeiro | `PREENCHER_EMAIL_LEILOEIRO` | `PREENCHER_SENHA_LEILOEIRO` |
+| Licitante 1 | `PREENCHER_EMAIL_LICITANTE_1` | `PREENCHER_SENHA_LICITANTE_1` |
+| Licitante 2 | `PREENCHER_EMAIL_LICITANTE_2` | `PREENCHER_SENHA_LICITANTE_2` |
+
+URL pública da aplicação: `PREENCHER_URL_DO_DEPLOY`
+
+O cadastro público cria usuários com o papel `BIDDER`. A conta de leiloeiro deve ser provisionada com o papel `AUCTIONEER` pelo seed ou diretamente no banco. Use apenas contas e senhas criadas para demonstração; não coloque aqui credenciais pessoais, segredos do ambiente ou dados de conexão com o banco.
+
 ### Testar com Postman ou Insomnia
 
 Na raiz do projeto está a coleção `rotas-api.postman_collection.json`. Importe esse arquivo pelo menu **Import** do Postman ou do Insomnia. A coleção usa `http://localhost:3000` como endereço padrão; altere a variável `baseUrl` se a API estiver em outra porta.
