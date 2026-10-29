@@ -36,7 +36,7 @@ export class LotsService {
       const response = await fetch(url, {
         headers: {
           Accept: 'application/json',
-          'AIC-User-Agent': `verzel-leiloes (${process.env.AIC_USER_EMAIL})`,
+          'AIC-User-Agent': this.getAicUserAgent(),
         },
         signal: AbortSignal.timeout(5000),
       });
@@ -79,6 +79,65 @@ export class LotsService {
         'Não foi possível consultar a API de obras de arte. Tente novamente em instantes.',
       );
     }
+  }
+
+  async getArtworkImage(imageId: string) {
+    const validImageId =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!validImageId.test(imageId)) {
+      throw new BadRequestException('Identificador de imagem inválido.');
+    }
+
+    try {
+      const response = await fetch(
+        `https://www.artic.edu/iiif/2/${imageId}/full/843,/0/default.jpg`,
+        {
+          headers: {
+            Accept: 'image/jpeg,image/*;q=0.8',
+            'AIC-User-Agent': this.getAicUserAgent(),
+          },
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+
+      if (response.status === 404) {
+        throw new NotFoundException('Imagem não encontrada na API externa.');
+      }
+
+      if (!response.ok) {
+        throw new ServiceUnavailableException(
+          'A API externa não conseguiu fornecer esta imagem.',
+        );
+      }
+
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.toLowerCase().startsWith('image/')) {
+        throw new ServiceUnavailableException(
+          'A API externa retornou um formato inválido para a imagem.',
+        );
+      }
+
+      return {
+        body: Buffer.from(await response.arrayBuffer()),
+        contentType,
+      };
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException ||
+        error instanceof ServiceUnavailableException
+      ) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Não foi possível carregar a imagem da API externa.',
+      );
+    }
+  }
+
+  private getAicUserAgent() {
+    return `verzel-leiloes (${process.env.AIC_USER_EMAIL || 'contact-not-configured'})`;
   }
 
   async create(auctioneerId: string, createLotDto: CreateLotDto) {

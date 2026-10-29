@@ -9,8 +9,10 @@ import {
   Delete,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { UserRole } from '../../generated/prisma/enums.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -30,6 +32,23 @@ export class LotsController {
   @Get('artworks/search')
   searchArtworks(@Query('q') query: string) {
     return this.lotsService.searchArtworks(query);
+  }
+
+  @Get('artworks/image/:imageId')
+  async getArtworkImage(
+    @Param('imageId') imageId: string,
+    @Res() response: Response,
+  ) {
+    const image = await this.lotsService.getArtworkImage(imageId);
+
+    response.setHeader('Content-Type', image.contentType);
+    response.setHeader(
+      'Cache-Control',
+      'public, max-age=86400, stale-while-revalidate=604800',
+    );
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+
+    return response.send(image.body);
   }
 
   @Post()

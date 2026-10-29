@@ -46,7 +46,7 @@ DIRECT_URL="postgresql://usuario:senha@localhost:5432/verzel_leiloes?schema=publ
 # Porta HTTP da API; opcional, o padrão é 3000
 PORT=3000
 
-# E-mail de contato enviado no User-Agent das consultas ao Art Institute of Chicago
+# E-mail de contato enviado no User-Agent das consultas e imagens do Art Institute of Chicago
 AIC_USER_EMAIL="desenvolvedor@example.com"
 
 # Origem permitida para o WebSocket; opcional em desenvolvimento local
@@ -230,6 +230,7 @@ Exemplo:
 | Método   | Rota                            | Descrição                                                   |
 | -------- | ------------------------------- | ----------------------------------------------------------- |
 | `GET`    | `/lots/artworks/search?q=texto` | Pesquisa obras de arte externas para auxiliar o cadastro.   |
+| `GET`    | `/lots/artworks/image/:imageId` | Entrega pelo backend uma imagem do Art Institute de Chicago. |
 | `POST`   | `/lots`                         | Cadastra um lote associado a um leilão.                     |
 | `GET`    | `/lots`                         | Lista os lotes.                                             |
 | `GET`    | `/lots/mine`                    | Lista os lotes do leiloeiro autenticado.                    |
@@ -346,6 +347,8 @@ O leiloeiro dono do lote pode chamar `POST /lots/:id/cancel` antes do fim do pra
 O extrato do vencedor recebe uma movimentação `AUCTION_PAYMENT`; o do leiloeiro recebe `AUCTION_EARNING`. O leiloeiro pode consultar o próprio saldo e extrato, mas não pode usar o depósito simulado de licitante.
 
 #### Pesquisa de obras
+
+A rota `GET /lots/artworks/image/:imageId` busca a imagem no serviço IIIF do Art Institute e a entrega como conteúdo binário, encaminhando o cabeçalho `AIC-User-Agent`. Isso permite que o frontend carregue as imagens sem fazer a requisição diretamente ao domínio externo. As respostas ficam em cache por 24 horas. O parâmetro `imageId` deve ser o identificador da imagem retornado na busca.
 
 A rota `/lots/artworks/search` consulta a API pública do Art Institute of Chicago. Informe o parâmetro `q` com o nome da obra ou do artista. A consulta externa solicita até 12 resultados; a aplicação retorna somente os itens que possuem imagem, incluindo título, artista, data, técnica, ID externo e URL da imagem.
 
