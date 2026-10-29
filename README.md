@@ -198,7 +198,7 @@ Exemplo:
 | Método                      | Rota                                    | Acesso                                                                      |
 | --------------------------- | --------------------------------------- | --------------------------------------------------------------------------- |
 | `POST`                      | `/auth/login`                           | Público; retorna token JWT.                                                 |
-| `GET`                       | `/auth/me`                              | Requer token JWT.                                                           |
+| `GET`                       | `/auth/me`                              | Requer token JWT; retorna os dados do perfil autenticado.                  |
 | `POST`                      | `/bids`                                 | Requer papel `BIDDER`; registra um lance válido.                            |
 | `GET`                       | `/bids/me/wins`                         | Requer papel `BIDDER`; lista os arremates do licitante autenticado.         |
 | `GET`                       | `/wallet/me`                            | Requer papel `BIDDER` ou `AUCTIONEER`; mostra o saldo da própria carteira.  |
@@ -213,6 +213,21 @@ Exemplo:
 | `POST`                      | `/lots/:id/cancel`                      | Requer papel `AUCTIONEER`; só permite cancelar lote sem lances.             |
 | `GET`                       | `/lots/mine`                            | Requer papel `AUCTIONEER`.                                                  |
 | `GET`                       | `/lots/:id/receipt` e `/lots/:id/audit` | Públicos; comprovante e verificação do histórico de lances.                 |
+
+Use `GET /auth/me` para consultar os dados da conta associada ao token. A resposta inclui `id`, `name`, `email`, `role`, `createdAt` e `updatedAt`; a senha não é retornada.
+
+Exemplo de resposta:
+
+```json
+{
+  "id": "UUID_DO_USUARIO",
+  "name": "Ana Silva",
+  "email": "ana@example.com",
+  "role": "BIDDER",
+  "createdAt": "2026-10-29T12:00:00.000Z",
+  "updatedAt": "2026-10-29T12:00:00.000Z"
+}
+```
 
 Envie o token nas rotas protegidas no cabeçalho `Authorization: Bearer <token>`. O papel atual é consultado no banco durante a autenticação de cada requisição.
 
