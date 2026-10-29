@@ -47,6 +47,7 @@ export class LotsController {
       'public, max-age=86400, stale-while-revalidate=604800',
     );
     response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     return response.send(image.body);
   }
