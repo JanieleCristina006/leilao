@@ -99,6 +99,7 @@ export class BidsService {
           id: string;
           lotId: string;
           bidderId: string;
+          bidder: { name: string };
           amount: Prisma.Decimal;
           status: BidStatus;
           createdAt: Date;
@@ -218,6 +219,7 @@ export class BidsService {
                 amount: true,
                 status: true,
                 createdAt: true,
+                bidder: { select: { name: true } },
               },
             });
 
@@ -342,6 +344,7 @@ export class BidsService {
           lotId: result.bid.lotId,
           bidId: result.bid.id,
           bidderId: result.bid.bidderId,
+          bidderName: result.bid.bidder.name,
           previousLeaderId: result.previousLeaderId,
           amount: result.bid.amount.toFixed(2),
           createdAt: result.bid.createdAt,

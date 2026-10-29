@@ -145,6 +145,7 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     lotId: string;
     bidId: string;
     bidderId: string;
+    bidderName: string;
     previousLeaderId: string | null;
     amount: string;
     createdAt: Date;
@@ -157,7 +158,7 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         id: event.bidId,
         amount: event.amount,
         createdAt: event.createdAt.toISOString(),
-        bidderLabel: 'Licitante',
+        bidderLabel: event.bidderName,
       },
       endsAt: event.endsAt.toISOString(),
     });
@@ -224,7 +225,13 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         where: { lotId, status: BidStatus.ACCEPTED },
         orderBy: { createdAt: 'desc' },
         take: 50,
-        select: { id: true, bidderId: true, amount: true, createdAt: true },
+        select: {
+          id: true,
+          bidderId: true,
+          amount: true,
+          createdAt: true,
+          bidder: { select: { name: true } },
+        },
       }),
       this.prisma.bid.findFirst({
         where: { lotId, status: BidStatus.ACCEPTED },
@@ -249,6 +256,7 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         id: bid.id,
         amount: bid.amount.toFixed(2),
         createdAt: bid.createdAt.toISOString(),
+        bidderName: bid.bidder.name,
         isMine: bid.bidderId === userId,
       })),
       isLeading: leader?.bidderId === userId,
