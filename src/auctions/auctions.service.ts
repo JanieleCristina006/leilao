@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client.js';
+import { AuctionStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
@@ -12,6 +13,35 @@ import { UpdateAuctionDto } from './dto/update-auction.dto';
 @Injectable()
 export class AuctionsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async updateScheduledStatuses() {
+    const now = new Date();
+
+    const activated = await this.prisma.auction.updateMany({
+      where: {
+        status: { in: [AuctionStatus.DRAFT, AuctionStatus.SCHEDULED] },
+        startsAt: { lte: now },
+        endsAt: { gt: now },
+      },
+      data: { status: AuctionStatus.ACTIVE },
+    });
+
+    const finished = await this.prisma.auction.updateMany({
+      where: {
+        status: {
+          in: [
+            AuctionStatus.DRAFT,
+            AuctionStatus.SCHEDULED,
+            AuctionStatus.ACTIVE,
+          ],
+        },
+        endsAt: { lte: now },
+      },
+      data: { status: AuctionStatus.FINISHED },
+    });
+
+    return { activated: activated.count, finished: finished.count };
+  }
 
   async create(auctioneerId: string, createAuctionDto: CreateAuctionDto) {
     const startsAt = new Date(createAuctionDto.startsAt);

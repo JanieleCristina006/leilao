@@ -6,6 +6,7 @@ API REST para gerenciamento de leilões, usuários e lotes, construída com Nest
 
 - Cadastro e gerenciamento de usuários.
 - Cadastro e gerenciamento de leilões, com validação do período de início e encerramento.
+- Atualização automática do status dos leilões conforme os horários de início e encerramento.
 - Cadastro e gerenciamento de lotes vinculados a um leilão.
 - Fechamento automático de lotes e liquidação da arrematação.
 - Atualização da sala de lances em tempo real via WebSocket.
@@ -210,6 +211,8 @@ Campos para `POST /auctions`:
 
 A data de encerramento precisa ser posterior à data de início.
 
+O cron do backend verifica os horários a cada cinco segundos. Quando `startsAt` é atingido, leilões em `DRAFT` ou `SCHEDULED` passam para `ACTIVE`, desde que `endsAt` ainda não tenha sido atingido. Quando `endsAt` é atingido, leilões em `DRAFT`, `SCHEDULED` ou `ACTIVE` passam para `FINISHED`. Se a aplicação voltar após um desses horários, o cron ajusta o status conforme o horário atual: ativa o leilão se ele ainda estiver no período ou encerra se `endsAt` já tiver passado.
+
 Exemplo:
 
 ```json
@@ -332,7 +335,7 @@ Ao aceitar um lance, a API move o valor do saldo disponível para o comprometido
 
 Se um lance válido chegar nos últimos dois minutos do lote, o encerramento daquele lote é prorrogado em mais dois minutos. A nova data é gravada junto com o lance na mesma transação e enviada no evento `bid.updated` da sala ao vivo. Cada novo lance que entrar nos últimos dois minutos do encerramento atualizado pode prorrogar o lote novamente.
 
-O backend verifica os prazos a cada cinco segundos. Quando o lote vence, fecha como `SOLD` se houver um lance aceito ou `UNSOLD` se não houver lances. Para `SOLD`, o sistema debita o valor do saldo comprometido do vencedor, credita o saldo disponível do leiloeiro e grava as duas movimentações. Para ambos os resultados, cria um `AuctionReceipt`; lote sem lances recebe valor final `0.00` e `winnerId` nulo. Quando todos os lotes terminam, o leilão passa para `FINISHED`.
+O backend verifica os prazos a cada cinco segundos. Quando o lote vence, fecha como `SOLD` se houver um lance aceito ou `UNSOLD` se não houver lances. Para `SOLD`, o sistema debita o valor do saldo comprometido do vencedor, credita o saldo disponível do leiloeiro e grava as duas movimentações. Para ambos os resultados, cria um `AuctionReceipt`; lote sem lances recebe valor final `0.00` e `winnerId` nulo. O leilão também passa para `FINISHED` quando todos os lotes terminam; independentemente disso, o cron encerra o leilão ao atingir `endsAt`.
 
 O comprovante pode ser compartilhado por `GET /lots/:id/receipt`. Ele mostra os dados públicos do lote, do leilão e o resultado, sem retornar nome, e-mail ou ID do licitante. Os dados públicos principais ficam em snapshot no comprovante para manter o resultado estável. O campo `sharePath` contém o caminho que pode ser compartilhado junto com o endereço da API.
 
