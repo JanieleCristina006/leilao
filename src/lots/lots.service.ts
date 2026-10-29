@@ -57,6 +57,9 @@ export class LotsService {
         );
       }
 
+      const publicApiUrl =
+        process.env.API_PUBLIC_URL?.replace(/\/+$/, '') ?? '';
+
       return result.data
         .filter((artwork: any) => artwork.image_id)
         .map((artwork: any) => ({
@@ -65,7 +68,7 @@ export class LotsService {
           artist: artwork.artist_display,
           date: artwork.date_display,
           medium: artwork.medium_display,
-          imageUrl: `${result.config.iiif_url}/${artwork.image_id}/full/843,/0/default.jpg`,
+          imageUrl: `${publicApiUrl}/lots/artworks/image/${artwork.image_id}`,
         }));
     } catch (error) {
       if (

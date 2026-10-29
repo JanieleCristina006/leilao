@@ -46,6 +46,9 @@ DIRECT_URL="postgresql://usuario:senha@localhost:5432/verzel_leiloes?schema=publ
 # Porta HTTP da API; opcional, o padrão é 3000
 PORT=3000
 
+# URL pública da API usada para montar as URLs das imagens via proxy
+API_PUBLIC_URL="http://localhost:3000"
+
 # E-mail de contato enviado no User-Agent das consultas e imagens do Art Institute of Chicago
 AIC_USER_EMAIL="desenvolvedor@example.com"
 
@@ -54,6 +57,12 @@ FRONTEND_ORIGIN="http://localhost:5173"
 ```
 
 `DATABASE_URL` é usada pelo `PrismaService` em tempo de execução. `DIRECT_URL` é lida pelo arquivo de configuração do Prisma CLI. Em desenvolvimento local, ambas podem apontar para a mesma base de dados. Não compartilhe nem versione o arquivo `.env`.
+
+`API_PUBLIC_URL` é a URL base pública desta API, sem barra no final. Ela é usada para montar o campo `imageUrl` das obras retornadas pela pesquisa. Em produção, configure-a no ambiente do backend com o domínio público da API. Exemplo para a VPS:
+
+```dotenv
+API_PUBLIC_URL="https://leilao.vps10920.panel.icontainer.online"
+```
 
 `JWT_SECRET` é obrigatório para iniciar a aplicação. Gere um valor aleatório longo e copie a saída para essa variável. Por exemplo, com Node.js:
 
@@ -348,9 +357,9 @@ O extrato do vencedor recebe uma movimentação `AUCTION_PAYMENT`; o do leiloeir
 
 #### Pesquisa de obras
 
-A rota `GET /lots/artworks/image/:imageId` busca a imagem no serviço IIIF do Art Institute e a entrega como conteúdo binário, encaminhando o cabeçalho `AIC-User-Agent`. Isso permite que o frontend carregue as imagens sem fazer a requisição diretamente ao domínio externo. As respostas ficam em cache por 24 horas. O parâmetro `imageId` deve ser o identificador da imagem retornado na busca.
+A rota `GET /lots/artworks/image/:imageId` busca a imagem no serviço IIIF do Art Institute e a entrega como conteúdo binário, encaminhando o cabeçalho `AIC-User-Agent`. Isso permite que o frontend carregue as imagens sem fazer a requisição diretamente ao domínio externo. As respostas ficam em cache por 24 horas. O parâmetro `imageId` deve ser o UUID `image_id` retornado pela API externa, não o ID numérico da obra.
 
-A rota `/lots/artworks/search` consulta a API pública do Art Institute of Chicago. Informe o parâmetro `q` com o nome da obra ou do artista. A consulta externa solicita até 12 resultados; a aplicação retorna somente os itens que possuem imagem, incluindo título, artista, data, técnica, ID externo e URL da imagem.
+A rota `/lots/artworks/search` consulta a API pública do Art Institute of Chicago. Informe o parâmetro `q` com o nome da obra ou do artista. A consulta externa solicita até 12 resultados; a aplicação retorna somente os itens que possuem imagem, incluindo título, artista, data, técnica, ID externo e `imageUrl`. Esse campo aponta para a rota de proxy da própria API, construída com `API_PUBLIC_URL`. O frontend deve usar o `imageUrl` retornado para exibir a imagem.
 
 A consulta depende de acesso à internet. Se a API externa estiver indisponível ou responder com erro, a rota retorna `503 Service Unavailable`.
 
