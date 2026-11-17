@@ -71,8 +71,6 @@ API_PUBLIC_URL="http://localhost:3000"
 # E-mail de contato enviado no User-Agent das consultas e imagens do Art Institute of Chicago
 AIC_USER_EMAIL="desenvolvedor@example.com"
 
-# Origem permitida para o WebSocket; opcional em desenvolvimento local
-FRONTEND_ORIGIN="http://localhost:5173"
 ```
 
 `DATABASE_URL` é usada pelo `PrismaService` em tempo de execução. `DIRECT_URL` é lida pelo arquivo de configuração do Prisma CLI. Em desenvolvimento local, ambas podem apontar para a mesma base de dados. Não compartilhe nem versione o arquivo `.env`.
@@ -491,7 +489,7 @@ Os testes unitários usam mocks do Prisma e não abrem conexão com PostgreSQL. 
 - Ao encerrar um lote com lance, o sistema liquida o valor reservado para o leiloeiro. Sem lances, fecha como `UNSOLD`, com valor final `0.00` e sem vencedor.
 - O comprovante e a auditoria são públicos e não expõem nome, e-mail ou ID do licitante. Lances antigos sem os campos da cadeia de hashes podem ser reportados como `INCOMPLETE`.
 - A auditoria HMAC exige uma chave independente fora do banco e não certifica históricos antigos. Reescrever valores, cadeia e âncora sem a chave não produz `INTACT`; restaurações completas de snapshots antigos exigem proteção externa adicional.
-- A busca de obras depende da API externa do Art Institute of Chicago e de acesso à internet. Para o WebSocket do frontend, configure `FRONTEND_ORIGIN` com a origem correta.
+- A busca de obras depende da API externa do Art Institute of Chicago e de acesso à internet.
 
 ## Documentação externa
 
@@ -542,4 +540,4 @@ Os eventos enviados pelo servidor são:
 
 Para sair de uma sala sem encerrar a conexão, envie `socket.emit('lot.leave', { lotId })`. O cronômetro deve contar localmente até o `endsAt` recebido pelo servidor; ele não deve ser usado para validar lances. O `startsAt` é do leilão e, ao criar um lote, o `endsAt` inicial é copiado do leilão. Depois, cada lote pode ter seu próprio horário de encerramento por causa do anti-sniping. O servidor confere esses horários ao processar `POST /bids`.
 
-Configure `FRONTEND_ORIGIN` com a origem pública do frontend. Várias origens podem ser separadas por vírgula. A origem local `http://localhost:5173` também fica liberada para desenvolvimento. A mesma lista é usada pelo CORS HTTP e pelo Socket.IO.
+O CORS HTTP e o Socket.IO aceitam requisições de qualquer origem.

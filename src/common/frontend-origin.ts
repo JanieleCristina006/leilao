@@ -8,3 +8,10 @@ export function getAllowedFrontendOrigins() {
 
   return [...new Set([LOCAL_FRONTEND_ORIGIN, ...configuredOrigins])];
 }
+
+export function checkFrontendOrigin(
+  origin: string | undefined,
+  callback: (error: Error | null, allowed?: boolean) => void,
+) {
+  callback(null, !origin || getAllowedFrontendOrigins().includes(origin));
+}
