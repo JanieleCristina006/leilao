@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Verzel Leilões - API",
+    "name": "Arremate Leilões - API",
     "description": "Coleção para testar a API local. Use http://localhost:3000 em baseUrl. Aplique todas as migrations antes dos testes. Promova a primeira conta ADMIN pelo banco, depois use a rota de papel na pasta de administrador. Faça depósitos simulados para os licitantes antes dos lances.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },

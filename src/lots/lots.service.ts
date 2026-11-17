@@ -146,7 +146,7 @@ export class LotsService {
   }
 
   private getAicUserAgent() {
-    return `verzel-leiloes (${process.env.AIC_USER_EMAIL || 'contact-not-configured'})`;
+    return `arremate-leiloes (${process.env.AIC_USER_EMAIL || 'contact-not-configured'})`;
   }
 
   async create(auctioneerId: string, createLotDto: CreateLotDto) {

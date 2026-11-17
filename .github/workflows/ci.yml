@@ -4,8 +4,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/verzel_test
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/verzel_test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/arremate_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/arremate_test
       JWT_SECRET: ci-only-jwt-secret-with-at-least-32-bytes
       BID_AUDIT_SECRET: ci-only-audit-secret-independent-of-jwt-with-32-bytes
     steps:

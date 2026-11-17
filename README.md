@@ -1,4 +1,4 @@
-# Verzel Leilões
+# Arremate Leilões
 
 API REST para gerenciamento de leilões, usuários e lotes, construída com NestJS, TypeScript e Prisma ORM.
 
@@ -57,10 +57,10 @@ Além do cadastro, leilões e lotes, a API inclui carteira com depósito simulad
 JWT_SECRET="cole-aqui-uma-chave-aleatoria-longa"
 
 # Conexão usada pela aplicação NestJS
-DATABASE_URL="postgresql://usuario:senha@localhost:5432/verzel_leiloes?schema=public"
+DATABASE_URL="postgresql://usuario:senha@localhost:5432/arremate_leiloes?schema=public"
 
 # Conexão usada pelos comandos do Prisma CLI
-DIRECT_URL="postgresql://usuario:senha@localhost:5432/verzel_leiloes?schema=public"
+DIRECT_URL="postgresql://usuario:senha@localhost:5432/arremate_leiloes?schema=public"
 
 # Porta HTTP da API; opcional, o padrão é 3000
 PORT=3000

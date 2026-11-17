@@ -20,7 +20,7 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle('Verzel Leilões API')
+    .setTitle('Arremate Leilões API')
     .setDescription('Leilões, lotes, carteira e lances. Eventos WebSocket e regras de estado estão documentados no README.')
     .setVersion('1.0')
     .addBearerAuth()
