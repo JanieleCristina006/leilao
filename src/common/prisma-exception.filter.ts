@@ -1,9 +1,11 @@
-import { ArgumentsHost, Catch, ExceptionFilter } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { Prisma } from '../../generated/prisma/client.js';
 
 @Catch(Prisma.PrismaClientKnownRequestError)
 export class PrismaExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(PrismaExceptionFilter.name);
+
   catch(error: Prisma.PrismaClientKnownRequestError, host: ArgumentsHost) {
     const errors: Record<string, [number, string]> = {
       P2025: [404, 'Recurso não encontrado.'],
@@ -18,6 +20,9 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       500,
       'Erro interno do servidor.',
     ];
+    if (statusCode === 500) {
+      this.logger.error(`Erro inesperado do Prisma: ${error.code}`);
+    }
     host
       .switchToHttp()
       .getResponse<Response>()
