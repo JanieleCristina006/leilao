@@ -1,0 +1,22 @@
+name: Backend checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/verzel_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/verzel_test
+      JWT_SECRET: ci-only-jwt-secret-with-at-least-32-bytes
+      BID_AUDIT_SECRET: ci-only-audit-secret-independent-of-jwt-with-32-bytes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --config=./prisma7.config.ts
+      - run: npx prisma validate --config=./prisma7.config.ts
+      - run: npm run build
+      - run: npm test -- --runInBand
+      - run: npm run test:contract

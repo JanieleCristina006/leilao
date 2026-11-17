@@ -10,7 +10,12 @@ import { CreateLotDto } from './dto/create-lot.dto';
 import { UpdateLotDto } from './dto/update-lot.dto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { createBidAuditHash } from '../bids/bid-audit.utils.js';
+import {
+  createBidAuditHash,
+  createBidAuditSignature,
+} from '../bids/bid-audit.utils.js';
+import { serializable } from '../common/serializable.js';
+import { randomUUID } from 'node:crypto';
 import {
   getArtworkProxyUrl,
   normalizeArtworkImageUrl,
@@ -145,31 +150,38 @@ export class LotsService {
   }
 
   async create(auctioneerId: string, createLotDto: CreateLotDto) {
-    const auction = await this.prisma.auction.findFirst({
-      where: {
-        id: createLotDto.auctionId,
-        auctioneerId,
-      },
-      select: { id: true, endsAt: true },
-    });
+    this.validateAmounts(createLotDto);
+    return serializable(this.prisma, async (tx) => {
+      const auction = await tx.auction.findFirst({
+        where: {
+          id: createLotDto.auctionId,
+          auctioneerId,
+        },
+        select: { id: true, endsAt: true, startsAt: true, status: true },
+      });
 
-    if (!auction) {
-      throw new NotFoundException('Leilão não encontrado.');
-    }
+      if (!auction) {
+        throw new NotFoundException('Leilão não encontrado.');
+      }
 
-    return this.prisma.lot.create({
-      data: {
-        auctionId: auction.id,
-        endsAt: auction.endsAt,
-        title: createLotDto.title,
-        description: createLotDto.description,
-        imageUrl: normalizeArtworkImageUrl(createLotDto.imageUrl),
-        externalId: createLotDto.externalId,
-        startingBid: createLotDto.startingBid,
-        ...(createLotDto.minimumIncrement !== undefined && {
-          minimumIncrement: createLotDto.minimumIncrement,
-        }),
-      },
+      this.assertAuctionEditable(auction);
+      const id = randomUUID();
+      return tx.lot.create({
+        data: {
+          id,
+          auctionId: auction.id,
+          endsAt: auction.endsAt,
+          title: createLotDto.title,
+          description: createLotDto.description,
+          imageUrl: normalizeArtworkImageUrl(createLotDto.imageUrl),
+          externalId: createLotDto.externalId,
+          startingBid: createLotDto.startingBid,
+          bidAuditSignature: createBidAuditSignature(id, 0, null),
+          ...(createLotDto.minimumIncrement !== undefined && {
+            minimumIncrement: createLotDto.minimumIncrement,
+          }),
+        },
+      });
     });
   }
 
@@ -178,10 +190,12 @@ export class LotsService {
       orderBy: {
         createdAt: 'desc',
       },
+      include: { _count: { select: { bids: true } } },
     });
 
     return lots.map((lot) => ({
       ...lot,
+      bidCount: lot._count.bids,
       imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
     }));
   }
@@ -192,10 +206,12 @@ export class LotsService {
         auction: { is: { auctioneerId } },
       },
       orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { bids: true } } },
     });
 
     return lots.map((lot) => ({
       ...lot,
+      bidCount: lot._count.bids,
       imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
     }));
   }
@@ -203,6 +219,7 @@ export class LotsService {
   async findOne(id: string) {
     const lot = await this.prisma.lot.findUnique({
       where: { id },
+      include: { _count: { select: { bids: true } } },
     });
 
     if (!lot) {
@@ -211,6 +228,7 @@ export class LotsService {
 
     return {
       ...lot,
+      bidCount: lot._count.bids,
       imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
     };
   }
@@ -222,6 +240,7 @@ export class LotsService {
         id: true,
         bidAuditHead: true,
         bidAuditCount: true,
+        bidAuditSignature: true,
         receipt: {
           select: {
             bidHistoryHash: true,
@@ -238,6 +257,7 @@ export class LotsService {
             status: true,
             createdAt: true,
             auditSequence: true,
+            auditVersion: true,
             auditPreviousHash: true,
             auditHash: true,
           },
@@ -267,6 +287,12 @@ export class LotsService {
     );
 
     let tampered = false;
+    if (
+      lot.bidAuditSignature &&
+      lot.bidAuditSignature !==
+        createBidAuditSignature(lot.id, lot.bidAuditCount, lot.bidAuditHead)
+    )
+      tampered = true;
     let expectedSequence = 1;
     let previousHash: string | null = null;
 
@@ -290,7 +316,7 @@ export class LotsService {
       if (
         bid.auditSequence !== expectedSequence ||
         bid.auditPreviousHash !== previousHash ||
-        bid.auditHash !== expectedHash
+        (bid.auditVersion === 2 && bid.auditHash !== expectedHash)
       ) {
         tampered = true;
       }
@@ -321,7 +347,10 @@ export class LotsService {
 
     const integrity = tampered
       ? 'TAMPERED'
-      : unauditedBids.length > 0 || receiptSnapshotMissing
+      : unauditedBids.length > 0 ||
+          receiptSnapshotMissing ||
+          !lot.bidAuditSignature ||
+          lot.bids.some((bid) => bid.auditVersion !== 2)
         ? 'INCOMPLETE'
         : 'INTACT';
 
@@ -329,12 +358,18 @@ export class LotsService {
       lotId: lot.id,
       integrity,
       isIntact: integrity === 'INCOMPLETE' ? null : integrity === 'INTACT',
-      verifiedBidCount: auditedBids.length,
-      unauditedBidCount: unauditedBids.length,
+      verifiedBidCount: auditedBids.filter((bid) => bid.auditVersion === 2)
+        .length,
+      unauditedBidCount: lot.bids.filter(
+        (bid) => bid.auditVersion !== 2 || bid.auditHash === null,
+      ).length,
       expectedBidCount: lot.bidAuditCount,
       expectedHead: lot.bidAuditHead,
       events: [...lot.bids]
         .sort((left, right) => {
+          if (left.auditSequence !== null && right.auditSequence !== null) {
+            return left.auditSequence - right.auditSequence;
+          }
           const timeOrder =
             left.createdAt.getTime() - right.createdAt.getTime();
           return timeOrder || left.id.localeCompare(right.id);
@@ -346,7 +381,10 @@ export class LotsService {
           createdAt: bid.createdAt,
           previousHash: bid.auditPreviousHash,
           hash: bid.auditHash,
-          verifiable: bid.auditSequence !== null && bid.auditHash !== null,
+          verifiable:
+            bid.auditVersion === 2 &&
+            bid.auditSequence !== null &&
+            bid.auditHash !== null,
         })),
       checkedAt: new Date(),
     };
@@ -499,42 +537,106 @@ export class LotsService {
   }
 
   async update(id: string, auctioneerId: string, updateLotDto: UpdateLotDto) {
-    const data: Prisma.LotUpdateInput = {};
+    this.validateAmounts(updateLotDto);
+    return serializable(this.prisma, async (tx) => {
+      await this.assertLotEditable(tx, id, auctioneerId);
+      const data: Prisma.LotUpdateInput = {};
 
-    if (updateLotDto.title !== undefined) data.title = updateLotDto.title;
-    if (updateLotDto.description !== undefined) {
-      data.description = updateLotDto.description;
-    }
-    if (updateLotDto.imageUrl !== undefined) {
-      data.imageUrl = normalizeArtworkImageUrl(updateLotDto.imageUrl);
-    }
-    if (updateLotDto.externalId !== undefined) {
-      data.externalId = updateLotDto.externalId;
-    }
-    if (updateLotDto.startingBid !== undefined) {
-      data.startingBid = updateLotDto.startingBid;
-    }
+      if (updateLotDto.title !== undefined) data.title = updateLotDto.title;
+      if (updateLotDto.description !== undefined) {
+        data.description = updateLotDto.description;
+      }
+      if (updateLotDto.imageUrl !== undefined) {
+        data.imageUrl = normalizeArtworkImageUrl(updateLotDto.imageUrl);
+      }
+      if (updateLotDto.externalId !== undefined) {
+        data.externalId = updateLotDto.externalId;
+      }
+      if (updateLotDto.startingBid !== undefined) {
+        data.startingBid = updateLotDto.startingBid;
+      }
 
-    const lot = await this.prisma.lot.update({
-      where: {
-        id,
-        auction: { is: { auctioneerId } },
-      },
-      data,
+      const lot = await tx.lot.update({
+        where: {
+          id,
+          auction: { is: { auctioneerId } },
+        },
+        data,
+      });
+
+      return {
+        ...lot,
+        imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
+      };
     });
-
-    return {
-      ...lot,
-      imageUrl: normalizeArtworkImageUrl(lot.imageUrl),
-    };
   }
 
   async remove(id: string, auctioneerId: string) {
-    return this.prisma.lot.delete({
-      where: {
-        id,
-        auction: { is: { auctioneerId } },
-      },
+    return serializable(this.prisma, async (tx) => {
+      await this.assertLotEditable(tx, id, auctioneerId);
+      return tx.lot.delete({
+        where: {
+          id,
+          auction: { is: { auctioneerId } },
+        },
+      });
     });
+  }
+
+  private validateAmounts(dto: {
+    startingBid?: number;
+    minimumIncrement?: number;
+  }) {
+    for (const value of [dto.startingBid, dto.minimumIncrement]) {
+      if (
+        value !== undefined &&
+        (!Number.isFinite(value) ||
+          value < 0.01 ||
+          value > 9999999999.99 ||
+          !new Prisma.Decimal(value).equals(
+            new Prisma.Decimal(value).toDecimalPlaces(2),
+          ))
+      ) {
+        throw new BadRequestException(
+          'Valores devem ser positivos, com até duas casas decimais.',
+        );
+      }
+    }
+  }
+
+  private assertAuctionEditable(auction: {
+    status: AuctionStatus;
+    startsAt: Date;
+    endsAt: Date;
+  }) {
+    if (
+      !(
+        [AuctionStatus.DRAFT, AuctionStatus.SCHEDULED] as AuctionStatus[]
+      ).includes(auction.status) ||
+      auction.startsAt <= new Date() ||
+      auction.endsAt <= new Date()
+    ) {
+      throw new ConflictException(
+        'Os lotes só podem ser cadastrados ou alterados antes do início do leilão.',
+      );
+    }
+  }
+
+  private async assertLotEditable(
+    tx: Prisma.TransactionClient,
+    id: string,
+    auctioneerId: string,
+  ) {
+    const lot = await tx.lot.findFirst({
+      where: { id, auction: { is: { auctioneerId } } },
+      include: { auction: true, _count: { select: { bids: true } } },
+    });
+    if (!lot) throw new NotFoundException('Lote não encontrado.');
+    if (lot.status !== LotStatus.AVAILABLE || lot._count.bids > 0) {
+      throw new ConflictException(
+        'Não é possível alterar ou excluir um lote com lances ou encerrado.',
+      );
+    }
+    this.assertAuctionEditable(lot.auction);
   }
 }

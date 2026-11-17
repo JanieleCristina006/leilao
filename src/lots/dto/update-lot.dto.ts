@@ -1,4 +1,4 @@
-import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { OmitType, PartialType } from '@nestjs/swagger';
 import { CreateLotDto } from './create-lot.dto';
 
 export class UpdateLotDto extends PartialType(

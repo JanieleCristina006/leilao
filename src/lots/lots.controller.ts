@@ -20,6 +20,8 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { LotsService } from './lots.service';
 import { CreateLotDto } from './dto/create-lot.dto';
 import { UpdateLotDto } from './dto/update-lot.dto';
+import { ApiOkResponse } from '@nestjs/swagger';
+import { LotResponseDto } from './dto/lot-response.dto.js';
 
 type AuthenticatedRequest = {
   user: { userId: string };
@@ -63,11 +65,13 @@ export class LotsController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [LotResponseDto] })
   findAll() {
     return this.lotsService.findAll();
   }
 
   @Get('mine')
+  @ApiOkResponse({ type: [LotResponseDto] })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.AUCTIONEER)
   findMine(@Req() request: AuthenticatedRequest) {
@@ -85,6 +89,7 @@ export class LotsController {
   }
 
   @Get(':id')
+  @ApiOkResponse({ type: LotResponseDto })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.lotsService.findOne(id);
   }

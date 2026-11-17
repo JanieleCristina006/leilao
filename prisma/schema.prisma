@@ -1,7 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
   provider = "prisma-client"
@@ -98,6 +95,7 @@ model Lot {
   status           LotStatus @default(AVAILABLE) // Situação atual do lote
   bidAuditHead     String?   @db.VarChar(64) // Hash mais recente da cadeia pública de lances
   bidAuditCount    Int       @default(0) // Quantidade de lances cobertos pela cadeia
+  bidAuditSignature String?  @db.VarChar(64)
   createdAt        DateTime  @default(now()) // Data de criação do lote
   updatedAt        DateTime  @updatedAt // Data da última atualização
 
@@ -117,6 +115,7 @@ model Bid {
   status            BidStatus @default(ACCEPTED) // Situação do lance
   createdAt         DateTime  @default(now()) // Data e hora em que o lance foi feito
   auditSequence     Int?
+  auditVersion      Int?
   auditPreviousHash String?   @db.VarChar(64)
   auditHash         String?   @db.VarChar(64)
 

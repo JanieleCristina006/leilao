@@ -11,6 +11,7 @@ import {
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
 import { LoginDto } from './dto/login.dto.js';
+import { ApiBearerAuth } from '@nestjs/swagger';
 
 type AuthenticatedRequest = {
   user: {
@@ -30,6 +31,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   getCurrentUser(@Req() request: AuthenticatedRequest) {
     return this.authService.getCurrentUser(request.user.userId);

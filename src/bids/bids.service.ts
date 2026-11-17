@@ -16,7 +16,11 @@ import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBidDto } from './dto/create-bid.dto.js';
 import { BidsGateway } from './bids.gateway.js';
-import { createBidAuditHash } from './bid-audit.utils.js';
+import {
+  createBidAuditHash,
+  createBidAuditSignature,
+} from './bid-audit.utils.js';
+import { serializable } from '../common/serializable.js';
 import { normalizeArtworkImageUrl } from '../common/artwork-image-url.js';
 
 const MAX_TRANSACTION_ATTEMPTS = 5;
@@ -99,12 +103,13 @@ export class BidsService {
           id: string;
           lotId: string;
           bidderId: string;
-          bidder: { name: string };
           amount: Prisma.Decimal;
           status: BidStatus;
           createdAt: Date;
+          auditSequence: number;
         };
         previousLeaderId: string | null;
+        bidCount: number;
         endsAt: Date;
       };
 
@@ -219,7 +224,6 @@ export class BidsService {
                 amount: true,
                 status: true,
                 createdAt: true,
-                bidder: { select: { name: true } },
               },
             });
 
@@ -239,8 +243,31 @@ export class BidsService {
               where: { id: bid.id },
               data: {
                 auditSequence,
+                auditVersion: 2,
                 auditPreviousHash: lot.bidAuditHead,
                 auditHash,
+              },
+            });
+
+            await tx.auditLog.create({
+              data: {
+                entityType: 'Bid',
+                entityId: bid.id,
+                action: 'BID_ACCEPTED',
+                previousHash: lot.bidAuditHead,
+                currentHash: auditHash,
+                createdAt: bid.createdAt,
+                payload: {
+                  version: 2,
+                  sequence: auditSequence,
+                  bidId: bid.id,
+                  lotId: bid.lotId,
+                  bidderId: bid.bidderId,
+                  amount: bid.amount.toFixed(2),
+                  status: bid.status,
+                  createdAt: bid.createdAt.toISOString(),
+                  previousHash: lot.bidAuditHead,
+                },
               },
             });
 
@@ -249,7 +276,7 @@ export class BidsService {
                 walletId: bidderWallet.id,
                 type: WalletTransactionType.BID_RESERVATION,
                 amount,
-                description: `Reserva do lance ${bid.id}`,
+                description: `Reserva de lance: ${lot.title}`,
                 referenceId: bid.id,
               },
             });
@@ -288,7 +315,7 @@ export class BidsService {
                   walletId: leaderWallet.id,
                   type: WalletTransactionType.BID_RELEASE,
                   amount: currentLeader.amount,
-                  description: `Liberação do lance superado ${currentLeader.id}`,
+                  description: `Liberação de lance superado: ${lot.title}`,
                   referenceId: currentLeader.id,
                 },
               });
@@ -299,7 +326,7 @@ export class BidsService {
               lot.endsAt.getTime() - now.getTime() <= ANTI_SNIPING_WINDOW_MS;
 
             if (isInAntiSnipingWindow) {
-              endsAt.setTime(endsAt.getTime() + ANTI_SNIPING_EXTENSION_MS);
+              endsAt.setTime(now.getTime() + ANTI_SNIPING_EXTENSION_MS);
             }
 
             await tx.lot.update({
@@ -309,12 +336,18 @@ export class BidsService {
                 status: LotStatus.IN_AUCTION,
                 bidAuditCount: auditSequence,
                 bidAuditHead: auditHash,
+                bidAuditSignature: createBidAuditSignature(
+                  lot.id,
+                  auditSequence,
+                  auditHash,
+                ),
                 ...(isInAntiSnipingWindow && { endsAt }),
               },
             });
 
             return {
-              bid,
+              bid: { ...bid, auditSequence },
+              bidCount: await tx.bid.count({ where: { lotId: lot.id } }),
               previousLeaderId: currentLeader?.bidderId ?? null,
               endsAt,
             };
@@ -344,7 +377,8 @@ export class BidsService {
           lotId: result.bid.lotId,
           bidId: result.bid.id,
           bidderId: result.bid.bidderId,
-          bidderName: result.bid.bidder.name,
+          sequence: result.bid.auditSequence,
+          bidCount: result.bidCount,
           previousLeaderId: result.previousLeaderId,
           amount: result.bid.amount.toFixed(2),
           createdAt: result.bid.createdAt,
@@ -372,13 +406,12 @@ export class BidsService {
     const expiredLots = await this.prisma.lot.findMany({
       where: {
         status: { in: [LotStatus.AVAILABLE, LotStatus.IN_AUCTION] },
-        OR: [
-          {
-            endsAt: { lte: now },
-            auction: { is: { status: AuctionStatus.ACTIVE } },
+        endsAt: { lte: now },
+        auction: {
+          is: {
+            status: { in: [AuctionStatus.ACTIVE, AuctionStatus.FINISHED] },
           },
-          { auction: { is: { status: AuctionStatus.FINISHED } } },
-        ],
+        },
       },
       orderBy: { endsAt: 'asc' },
       take: 100,
@@ -414,158 +447,156 @@ export class BidsService {
   }
 
   private closeLot(lotId: string) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const lot = await tx.lot.findUnique({
-          where: { id: lotId },
-          include: {
-            auction: {
-              select: {
-                id: true,
-                status: true,
-                auctioneerId: true,
-                title: true,
-              },
+    return serializable(this.prisma, async (tx) => {
+      const lot = await tx.lot.findUnique({
+        where: { id: lotId },
+        include: {
+          auction: {
+            select: {
+              id: true,
+              status: true,
+              auctioneerId: true,
+              title: true,
             },
           },
+        },
+      });
+
+      if (
+        !lot ||
+        (lot.status !== LotStatus.AVAILABLE &&
+          lot.status !== LotStatus.IN_AUCTION)
+      ) {
+        return null;
+      }
+
+      const now = new Date();
+      if (
+        lot.endsAt > now ||
+        !(
+          [AuctionStatus.ACTIVE, AuctionStatus.FINISHED] as AuctionStatus[]
+        ).includes(lot.auction.status)
+      )
+        return null;
+
+      const winner = await tx.bid.findFirst({
+        where: { lotId: lot.id, status: BidStatus.ACCEPTED },
+        orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }],
+        select: { bidderId: true, amount: true },
+      });
+      const finalAmount = winner?.amount ?? new Prisma.Decimal(0);
+
+      if (winner && !lot.auction.auctioneerId) {
+        throw new ConflictException(
+          'Não é possível liquidar o lote porque o leilão não tem leiloeiro vinculado.',
+        );
+      }
+
+      const totalBidCount = await tx.bid.count({ where: { lotId: lot.id } });
+
+      const receipt = await tx.auctionReceipt.create({
+        data: {
+          lotId: lot.id,
+          winnerId: winner?.bidderId ?? null,
+          finalAmount,
+          result: winner ? LotStatus.SOLD : LotStatus.UNSOLD,
+          lotTitle: lot.title,
+          lotDescription: lot.description,
+          lotImageUrl: lot.imageUrl,
+          startingBid: lot.startingBid,
+          auctionTitle: lot.auction.title,
+          bidHistoryHash: lot.bidAuditHead,
+          bidCount: totalBidCount,
+          bidAuditCount: lot.bidAuditCount,
+        },
+        select: { id: true },
+      });
+
+      if (winner && lot.auction.auctioneerId) {
+        const winnerWallet = await tx.wallet.findUnique({
+          where: { profileId: winner.bidderId },
+          select: { id: true },
         });
 
-        if (
-          !lot ||
-          (lot.status !== LotStatus.AVAILABLE &&
-            lot.status !== LotStatus.IN_AUCTION)
-        ) {
-          return null;
-        }
-
-        const now = new Date();
-        const auctionWasFinished =
-          lot.auction.status === AuctionStatus.FINISHED;
-        const lotDeadlinePassed =
-          lot.auction.status === AuctionStatus.ACTIVE && lot.endsAt <= now;
-
-        if (!auctionWasFinished && !lotDeadlinePassed) return null;
-
-        const winner = await tx.bid.findFirst({
-          where: { lotId: lot.id, status: BidStatus.ACCEPTED },
-          orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }],
-          select: { bidderId: true, amount: true },
-        });
-        const finalAmount = winner?.amount ?? new Prisma.Decimal(0);
-
-        if (winner && !lot.auction.auctioneerId) {
+        if (!winnerWallet) {
           throw new ConflictException(
-            'Não é possível liquidar o lote porque o leilão não tem leiloeiro vinculado.',
+            'A carteira do vencedor não foi encontrada.',
           );
         }
 
-        const totalBidCount = await tx.bid.count({ where: { lotId: lot.id } });
+        const debitWinner = await tx.wallet.updateMany({
+          where: {
+            id: winnerWallet.id,
+            committedBalance: { gte: winner.amount },
+          },
+          data: { committedBalance: { decrement: winner.amount } },
+        });
 
-        const receipt = await tx.auctionReceipt.create({
-          data: {
-            lotId: lot.id,
-            winnerId: winner?.bidderId ?? null,
-            finalAmount,
-            result: winner ? LotStatus.SOLD : LotStatus.UNSOLD,
-            lotTitle: lot.title,
-            lotDescription: lot.description,
-            lotImageUrl: lot.imageUrl,
-            startingBid: lot.startingBid,
-            auctionTitle: lot.auction.title,
-            bidHistoryHash: lot.bidAuditHead,
-            bidCount: totalBidCount,
-            bidAuditCount: lot.bidAuditCount,
+        if (debitWinner.count !== 1) {
+          throw new ConflictException(
+            'O saldo comprometido do vencedor não cobre o valor final do lote.',
+          );
+        }
+
+        const auctioneerWallet = await tx.wallet.upsert({
+          where: { profileId: lot.auction.auctioneerId },
+          create: {
+            profileId: lot.auction.auctioneerId,
+            availableBalance: winner.amount,
+          },
+          update: {
+            availableBalance: { increment: winner.amount },
           },
           select: { id: true },
         });
 
-        if (winner && lot.auction.auctioneerId) {
-          const winnerWallet = await tx.wallet.findUnique({
-            where: { profileId: winner.bidderId },
-            select: { id: true },
-          });
-
-          if (!winnerWallet) {
-            throw new ConflictException(
-              'A carteira do vencedor não foi encontrada.',
-            );
-          }
-
-          const debitWinner = await tx.wallet.updateMany({
-            where: {
-              id: winnerWallet.id,
-              committedBalance: { gte: winner.amount },
+        await tx.walletTransaction.createMany({
+          data: [
+            {
+              walletId: winnerWallet.id,
+              type: WalletTransactionType.AUCTION_PAYMENT,
+              amount: winner.amount,
+              description: `Pagamento do lote: ${lot.title}`,
+              referenceId: receipt.id,
             },
-            data: { committedBalance: { decrement: winner.amount } },
-          });
-
-          if (debitWinner.count !== 1) {
-            throw new ConflictException(
-              'O saldo comprometido do vencedor não cobre o valor final do lote.',
-            );
-          }
-
-          const auctioneerWallet = await tx.wallet.upsert({
-            where: { profileId: lot.auction.auctioneerId },
-            create: {
-              profileId: lot.auction.auctioneerId,
-              availableBalance: winner.amount,
+            {
+              walletId: auctioneerWallet.id,
+              type: WalletTransactionType.AUCTION_EARNING,
+              amount: winner.amount,
+              description: `Recebimento do lote: ${lot.title}`,
+              referenceId: receipt.id,
             },
-            update: {
-              availableBalance: { increment: winner.amount },
-            },
-            select: { id: true },
-          });
-
-          await tx.walletTransaction.createMany({
-            data: [
-              {
-                walletId: winnerWallet.id,
-                type: WalletTransactionType.AUCTION_PAYMENT,
-                amount: winner.amount,
-                description: `Pagamento do lote ${lot.id}`,
-                referenceId: receipt.id,
-              },
-              {
-                walletId: auctioneerWallet.id,
-                type: WalletTransactionType.AUCTION_EARNING,
-                amount: winner.amount,
-                description: `Recebimento do lote ${lot.id}`,
-                referenceId: receipt.id,
-              },
-            ],
-          });
-        }
-
-        const status = winner ? LotStatus.SOLD : LotStatus.UNSOLD;
-        await tx.lot.update({
-          where: { id: lot.id },
-          data: { status },
+          ],
         });
+      }
 
-        const openLots = await tx.lot.count({
-          where: {
-            auctionId: lot.auction.id,
-            status: { in: [LotStatus.AVAILABLE, LotStatus.IN_AUCTION] },
-          },
+      const status = winner ? LotStatus.SOLD : LotStatus.UNSOLD;
+      await tx.lot.update({
+        where: { id: lot.id },
+        data: { status },
+      });
+
+      const openLots = await tx.lot.count({
+        where: {
+          auctionId: lot.auction.id,
+          status: { in: [LotStatus.AVAILABLE, LotStatus.IN_AUCTION] },
+        },
+      });
+
+      if (openLots === 0 && lot.auction.status === AuctionStatus.ACTIVE) {
+        await tx.auction.updateMany({
+          where: { id: lot.auction.id, status: AuctionStatus.ACTIVE },
+          data: { status: AuctionStatus.FINISHED },
         });
+      }
 
-        if (openLots === 0 && lot.auction.status === AuctionStatus.ACTIVE) {
-          await tx.auction.updateMany({
-            where: { id: lot.auction.id, status: AuctionStatus.ACTIVE },
-            data: { status: AuctionStatus.FINISHED },
-          });
-        }
-
-        return {
-          lotId: lot.id,
-          status,
-          finalAmount: finalAmount.toFixed(2),
-          winnerId: winner?.bidderId ?? null,
-          closedAt: now,
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+      return {
+        lotId: lot.id,
+        status,
+        finalAmount: finalAmount.toFixed(2),
+        winnerId: winner?.bidderId ?? null,
+        closedAt: now,
+      };
+    });
   }
 }

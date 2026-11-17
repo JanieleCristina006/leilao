@@ -9,6 +9,8 @@ import { UsersModule } from '../users/users.module.js';
 import { BidsModule } from '../bids/bids.module.js';
 import { WalletsModule } from '../wallets/wallets.module.js';
 import { ScheduleModule } from '@nestjs/schedule';
+import { APP_FILTER } from '@nestjs/core';
+import { PrismaExceptionFilter } from '../common/prisma-exception.filter.js';
 
 @Module({
   imports: [
@@ -22,6 +24,6 @@ import { ScheduleModule } from '@nestjs/schedule';
     WalletsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_FILTER, useClass: PrismaExceptionFilter }],
 })
 export class AppModule {}

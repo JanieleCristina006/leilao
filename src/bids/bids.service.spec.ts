@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   AuctionStatus,
   BidStatus,
@@ -17,7 +17,7 @@ const makeHarness = () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      count: jest.fn(),
+      count: jest.fn().mockResolvedValue(1),
     },
     wallet: {
       findUnique: jest.fn(),
@@ -27,6 +27,7 @@ const makeHarness = () => {
     walletTransaction: { create: jest.fn(), createMany: jest.fn() },
     auctionReceipt: { create: jest.fn() },
     auction: { updateMany: jest.fn() },
+    auditLog: { create: jest.fn() },
   };
   const prisma = {
     $transaction: jest.fn().mockImplementation((callback) => callback(tx)),
@@ -68,9 +69,11 @@ const createActiveLot = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('BidsService regras de lances e liquidação', () => {
+  afterEach(() => jest.useRealTimers());
   it('aceita o primeiro lance no valor inicial e reserva o saldo', async () => {
     const { tx, service, gateway } = makeHarness();
     const createdAt = new Date();
+    tx.bid.count.mockResolvedValue(5); // Includes legacy bids outside the signed chain.
     tx.lot.findUnique.mockResolvedValue(createActiveLot());
     tx.bid.findFirst.mockResolvedValue(null);
     tx.wallet.findUnique.mockResolvedValue({ id: 'wallet-bidder' });
@@ -113,7 +116,11 @@ describe('BidsService regras de lances e liquidação', () => {
       }),
     );
     expect(gateway.publishBidAccepted).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: '100.00', lotId: 'lot-1' }),
+      expect.objectContaining({
+        amount: '100.00',
+        lotId: 'lot-1',
+        bidCount: 5,
+      }),
     );
   });
 
@@ -223,30 +230,65 @@ describe('BidsService regras de lances e liquidação', () => {
     );
   });
 
-  it('prorroga o encerramento em dois minutos quando o lance chega na janela final', async () => {
+  it.each([1, 60_000, 120_000, 120_001])(
+    'aplica a janela de prorrogação com %i ms restantes',
+    async (remaining) => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-11-17T12:00:00Z'));
+      const { tx, service } = makeHarness();
+      const initialEndsAt = new Date(Date.now() + remaining);
+      tx.lot.findUnique.mockResolvedValue(
+        createActiveLot({ endsAt: initialEndsAt }),
+      );
+      tx.bid.findFirst.mockResolvedValue(null);
+      tx.wallet.findUnique.mockResolvedValue({ id: 'wallet-bidder' });
+      tx.wallet.updateMany.mockResolvedValue({ count: 1 });
+      tx.bid.create.mockImplementation(({ data }) =>
+        Promise.resolve({
+          id: 'bid-1',
+          lotId: data.lotId,
+          bidderId: data.bidderId,
+          amount: data.amount,
+          status: data.status,
+          createdAt: new Date(),
+        }),
+      );
+
+      await service.create('bidder-1', { lotId: 'lot-1', amount: '100.00' });
+
+      const updatedEndsAt = tx.lot.update.mock.calls[0][0].data.endsAt as Date;
+      if (remaining > 120_000) {
+        expect(updatedEndsAt).toBeUndefined();
+        return;
+      }
+      expect(updatedEndsAt.getTime() - Date.now()).toBe(120_000);
+      expect(updatedEndsAt.getTime() - initialEndsAt.getTime()).toBe(
+        120_000 - remaining,
+      );
+    },
+  );
+
+  it('não liquida lote prorrogado mesmo se o leilão estiver FINISHED', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-17T12:00:00Z'));
+    const { tx, prisma, service } = makeHarness();
+    const lot = createActiveLot();
+    lot.auction.status = AuctionStatus.FINISHED;
+    prisma.lot.findMany.mockResolvedValue([{ id: lot.id }]);
+    tx.lot.findUnique.mockResolvedValue(lot);
+    expect(await service.closeExpiredLots()).toBe(0);
+    expect(tx.auctionReceipt.create).not.toHaveBeenCalled();
+    expect(tx.wallet.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejeita lance exatamente no encerramento do lote', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-17T12:00:00Z'));
     const { tx, service } = makeHarness();
-    const initialEndsAt = new Date(Date.now() + 60 * 1000);
     tx.lot.findUnique.mockResolvedValue(
-      createActiveLot({ endsAt: initialEndsAt }),
+      createActiveLot({ endsAt: new Date() }),
     );
-    tx.bid.findFirst.mockResolvedValue(null);
-    tx.wallet.findUnique.mockResolvedValue({ id: 'wallet-bidder' });
-    tx.wallet.updateMany.mockResolvedValue({ count: 1 });
-    tx.bid.create.mockImplementation(({ data }) =>
-      Promise.resolve({
-        id: 'bid-1',
-        lotId: data.lotId,
-        bidderId: data.bidderId,
-        amount: data.amount,
-        status: data.status,
-        createdAt: new Date(),
-      }),
-    );
-
-    await service.create('bidder-1', { lotId: 'lot-1', amount: '100.00' });
-
-    const updatedEndsAt = tx.lot.update.mock.calls[0][0].data.endsAt as Date;
-    expect(updatedEndsAt.getTime() - initialEndsAt.getTime()).toBe(120_000);
+    await expect(
+      service.create('bidder-1', { lotId: 'lot-1', amount: '100.00' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.wallet.updateMany).not.toHaveBeenCalled();
   });
 
   it('liquida o lote vendido, debita o vencedor e credita o leiloeiro', async () => {

@@ -6,7 +6,10 @@ import {
 } from '../../generated/prisma/enums.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { createBidAuditHash } from '../bids/bid-audit.utils.js';
+import {
+  createBidAuditHash,
+  createBidAuditSignature,
+} from '../bids/bid-audit.utils.js';
 import { LotsService } from './lots.service.js';
 
 const makeHarness = () => {
@@ -39,6 +42,7 @@ const makeAuditedBid = (amount = '100.00') => {
     status: BidStatus.ACCEPTED,
     createdAt: new Date('2026-01-01T12:00:00.000Z'),
     auditSequence: 1,
+    auditVersion: 2,
     auditPreviousHash: null,
     auditHash: '',
   };
@@ -63,6 +67,7 @@ describe('LotsService comprovante, auditoria e cancelamento', () => {
       id: 'lot-1',
       bidAuditHead: bid.auditHash,
       bidAuditCount: 1,
+      bidAuditSignature: createBidAuditSignature('lot-1', 1, bid.auditHash),
       receipt: null,
       bids: [bid],
     });
@@ -89,6 +94,7 @@ describe('LotsService comprovante, auditoria e cancelamento', () => {
       id: 'lot-1',
       bidAuditHead: bid.auditHash,
       bidAuditCount: 1,
+      bidAuditSignature: createBidAuditSignature('lot-1', 1, bid.auditHash),
       receipt: null,
       bids: [bid],
     });

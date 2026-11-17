@@ -1,4 +1,28 @@
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+
+export function validateAuditSecret() {
+  const secret = process.env.BID_AUDIT_SECRET;
+  if (
+    !secret ||
+    Buffer.byteLength(secret) < 32 ||
+    secret === process.env.JWT_SECRET
+  ) {
+    throw new Error(
+      'BID_AUDIT_SECRET deve ter pelo menos 32 bytes e ser diferente de JWT_SECRET.',
+    );
+  }
+  return secret;
+}
+
+export function createBidAuditSignature(
+  lotId: string,
+  count: number,
+  head: string | null,
+) {
+  return createHmac('sha256', validateAuditSecret())
+    .update(JSON.stringify({ domain: 'lot-anchor-v2', lotId, count, head }))
+    .digest('hex');
+}
 
 export type BidAuditRecord = {
   id: string;
@@ -13,7 +37,7 @@ export type BidAuditRecord = {
 
 export function createBidAuditHash(record: BidAuditRecord) {
   const canonicalRecord = JSON.stringify({
-    version: 1,
+    version: 2,
     sequence: record.sequence,
     bidId: record.id,
     lotId: record.lotId,
@@ -24,5 +48,7 @@ export function createBidAuditHash(record: BidAuditRecord) {
     previousHash: record.previousHash,
   });
 
-  return createHash('sha256').update(canonicalRecord).digest('hex');
+  return createHmac('sha256', validateAuditSecret())
+    .update(canonicalRecord)
+    .digest('hex');
 }

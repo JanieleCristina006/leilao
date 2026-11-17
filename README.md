@@ -2,6 +2,25 @@
 
 API REST para gerenciamento de leilões, usuários e lotes, construída com NestJS, TypeScript e Prisma ORM.
 
+## Executar a versão corrigida
+
+Use Node.js 22. Copie `.env.example` para `.env` e configure `JWT_SECRET` e `BID_AUDIT_SECRET` com valores aleatórios independentes. Gere cada chave com `node -e "console.log(require('node:crypto').randomBytes(64).toString('hex'))"`. A chave de auditoria é obrigatória, deve ter pelo menos 32 bytes e ficar fora do banco. Preserve-a para verificar históricos existentes.
+
+```bash
+npm ci
+npm run db:generate
+npm run db:migrate
+npm run build
+npm test -- --runInBand
+npm run start:prod
+```
+
+A migração de invariantes rejeita dados antigos com valores inválidos (por exemplo, lance inicial zero ou saldo negativo). Reconcilie esses registros antes de aplicá-la; ela não modifica valores financeiros silenciosamente. Não é necessário recriar o banco.
+
+Documentação OpenAPI: `http://localhost:3000/docs`; JSON para ferramentas de geração de clientes: `http://localhost:3000/docs-json`. Contagens são retornadas em `bidCount`; o histórico e os eventos usam `sequence` e `bidderLabel`. Valores monetários dos lances são strings decimais. O frontend precisa consumir esses campos para atualizar as contagens e a numeração na tela.
+
+O workflow `.github/workflows/ci.yml` valida schema, compilação, testes unitários e contrato OpenAPI, sem precisar de banco de dados. Para executar a integração localmente com PostgreSQL, use uma base descartável com nome terminado em `_test`, aplique as migrações, compile e rode `npm run test:integration` com `DATABASE_URL`, `DIRECT_URL` e os dois segredos definidos no ambiente. Os testes limpam apenas seus próprios registros. Migrações, seed e integração com banco são executados localmente.
+
 ## Funcionalidades disponíveis
 
 - Cadastro e gerenciamento de usuários.
@@ -140,15 +159,16 @@ As rotas não usam um prefixo global. Os corpos das requisições são enviados 
 
 ### Acesso de demonstração
 
-Preencha esta seção depois de criar as contas de demonstração no banco usado pela aplicação publicada. As credenciais precisam corresponder aos usuários existentes nesse banco; cadastrar usuários apenas na sua base local não os torna disponíveis no deploy.
+Defina `SEED_PASSWORD` no ambiente com pelo menos 12 caracteres e execute `npm run db:seed` depois das migrações. O seed cria quatro contas e um leilão com dois lotes, com início em cinco minutos. Reexecuções preservam senhas, saldos e prazos existentes. As carteiras começam zeradas; use a rota de depósito simulado para os licitantes.
 
 | Perfil | E-mail | Senha |
 | ------ | ------ | ----- |
-| Leiloeiro | `PREENCHER_EMAIL_LEILOEIRO` | `PREENCHER_SENHA_LEILOEIRO` |
-| Licitante 1 | `PREENCHER_EMAIL_LICITANTE_1` | `PREENCHER_SENHA_LICITANTE_1` |
-| Licitante 2 | `PREENCHER_EMAIL_LICITANTE_2` | `PREENCHER_SENHA_LICITANTE_2` |
+| Administrador | `admin@example.test` | Valor de `SEED_PASSWORD` na primeira execução |
+| Leiloeiro | `leiloeiro@example.test` | Valor de `SEED_PASSWORD` na primeira execução |
+| Licitante 1 | `licitante1@example.test` | Valor de `SEED_PASSWORD` na primeira execução |
+| Licitante 2 | `licitante2@example.test` | Valor de `SEED_PASSWORD` na primeira execução |
 
-URL pública da aplicação: `PREENCHER_URL_DO_DEPLOY`
+O endereço local é `http://localhost:3000`. O endereço publicado depende do ambiente de hospedagem e não foi revalidado nesta correção.
 
 O cadastro público cria usuários com o papel `BIDDER`. A conta de leiloeiro deve ser provisionada com o papel `AUCTIONEER` pelo seed ou diretamente no banco. Use apenas contas e senhas criadas para demonstração; não coloque aqui credenciais pessoais, segredos do ambiente ou dados de conexão com o banco.
 
@@ -374,13 +394,15 @@ O leilão precisa estar `ACTIVE`, dentro do período configurado e o lote precis
 
 Ao aceitar um lance, a API move o valor do saldo disponível para o comprometido e registra `BID_RESERVATION` no extrato. Quando outro licitante supera o líder, a reserva anterior volta para o saldo disponível e a API registra `BID_RELEASE`. A criação do lance, as alterações de saldo e a atualização de `Lot.currentBid` são feitas na mesma transação. Para testar, faça um depósito simulado para cada licitante antes de enviar lances. A coleção `rotas-api.postman_collection.json` inclui esses pedidos e o fluxo de dois licitantes.
 
-Se um lance válido chegar nos últimos dois minutos do lote, o encerramento daquele lote é prorrogado em mais dois minutos. A nova data é gravada junto com o lance na mesma transação e enviada no evento `bid.updated` da sala ao vivo. Cada novo lance que entrar nos últimos dois minutos do encerramento atualizado pode prorrogar o lote novamente.
+Se um lance válido chegar nos últimos dois minutos do lote, seu encerramento passa a ser o horário do lance mais dois minutos. A nova data é gravada junto com o lance na mesma transação e enviada no evento `bid.updated`. Novos lances na janela final podem prorrogar novamente. No instante exato do encerramento o lance é recusado.
 
-O backend verifica os prazos a cada cinco segundos. Quando o lote vence, fecha como `SOLD` se houver um lance aceito ou `UNSOLD` se não houver lances. Para `SOLD`, o sistema debita o valor do saldo comprometido do vencedor, credita o saldo disponível do leiloeiro e grava as duas movimentações. Para ambos os resultados, cria um `AuctionReceipt`; lote sem lances recebe valor final `0.00` e `winnerId` nulo. O leilão também passa para `FINISHED` quando todos os lotes terminam; independentemente disso, o cron encerra o leilão ao atingir `endsAt`.
+O backend verifica os prazos a cada cinco segundos. Cada lote só é liquidado depois de seu próprio `endsAt`, mesmo que o status do leilão esteja `FINISHED`. Fecha como `SOLD` com vencedor ou `UNSOLD` sem lances. Na venda, debita a reserva do vencedor e credita o leiloeiro na mesma transação; cria um comprovante em ambos os casos. O leilão permanece `ACTIVE` enquanto houver lotes abertos, inclusive no tempo extra. A ativação também recupera leilões cujo início ocorreu enquanto o serviço estava parado.
 
 O comprovante pode ser compartilhado por `GET /lots/:id/receipt`. Ele mostra os dados públicos do lote, do leilão e o resultado, sem retornar nome, e-mail ou ID do licitante. Os dados públicos principais ficam em snapshot no comprovante para manter o resultado estável. O campo `sharePath` contém o caminho que pode ser compartilhado junto com o endereço da API.
 
-Cada novo lance aceito recebe uma sequência e um hash SHA-256 ligado ao lance anterior. `GET /lots/:id/audit` recalcula os hashes e compara a sequência, a quantidade e o último hash com os valores registrados no lote e, após o encerramento, com o comprovante. `integrity` retorna `INTACT`, `TAMPERED` ou `INCOMPLETE`; lances anteriores à ativação dessa cadeia aparecem sem hash e deixam o resultado como `INCOMPLETE`. A cadeia detecta alterações que não atualizem os hashes e âncoras correspondentes; para resistir também a alguém que reescreva todos os dados e âncoras diretamente no banco, seria necessário guardar a âncora fora dele.
+Cada novo lance tem sequência, `auditVersion=2` e assinatura HMAC-SHA-256 encadeada. O lote guarda também uma assinatura da âncora (identificador, contagem e último hash). Sem `BID_AUDIT_SECRET`, quem altera somente o banco não consegue gerar assinaturas para valores modificados ou uma nova âncora válida. O evento assinado também é registrado em `AuditLog` na mesma transação. `GET /lots/:id/audit` verifica a cadeia e compara o snapshot do comprovante; retorna `INTACT`, `TAMPERED` ou `INCOMPLETE`. Históricos antigos sem HMAC, assinaturas removidas e versões desconhecidas ficam incompletos e nunca são certificados retroativamente. A proteção não detecta a restauração integral de um snapshot antigo validamente assinado; esse caso exige uma âncora externa e monotônica. A troca da chave invalida as assinaturas anteriores; esta versão não implementa rotação de chaves.
+
+Leilões novos só podem ser criados como `DRAFT` ou `SCHEDULED`, com início futuro. O servidor controla a ativação e a finalização; leilões encerrados não reabrem. Depois do início, o período não pode ser alterado. Cancelar um leilão com qualquer lance retorna `409`; sem lances, o cancelamento altera também os lotes abertos na mesma transação. Lotes só podem ser criados, editados ou excluídos antes do início, sem lances e no estado `AVAILABLE`. Lances iniciais e incrementos devem ser positivos, com até duas casas decimais. Essas operações usam transações serializáveis e releem as regras após conflitos concorrentes.
 
 O leiloeiro dono do lote pode chamar `POST /lots/:id/cancel` antes do fim do prazo. O backend rejeita o cancelamento se o lote já recebeu qualquer lance ou se já foi encerrado; quando o último lote ativo é cancelado, o leilão ativo é finalizado.
 
@@ -415,7 +437,7 @@ O schema define as seguintes entidades principais:
 - **Wallet** e **WalletTransaction**: carteira do perfil e histórico de movimentações.
 - **AuctionReceipt**: comprovante do resultado de um lote.
 - **Bid**: cada lance novo guarda sequência e hashes para a auditoria pública.
-- **AuditLog**: registro de auditoria com dados e hashes dos eventos.
+- **AuditLog**: cópia dos eventos de lances aceitos, com payload e HMAC, gravada atomicamente com o lance.
 
 O login usa JWT. O papel do perfil é verificado em cada requisição protegida. O cadastro público cria apenas licitantes; leiloeiros e administradores precisam ser provisionados fora desse cadastro. Leilões antigos sem `auctioneerId` não podem ser alterados ou receber novos lances até terem um leiloeiro vinculado; lotes com lances desses leilões também não podem ser liquidados sem um recebedor definido.
 
@@ -468,7 +490,7 @@ Os testes unitários usam mocks do Prisma e não abrem conexão com PostgreSQL. 
 - Um lance recebido nos dois minutos finais prorroga o lote por mais dois minutos. O backend verifica o encerramento a cada cinco segundos; a contagem regressiva exibida pelo frontend é apenas visual.
 - Ao encerrar um lote com lance, o sistema liquida o valor reservado para o leiloeiro. Sem lances, fecha como `UNSOLD`, com valor final `0.00` e sem vencedor.
 - O comprovante e a auditoria são públicos e não expõem nome, e-mail ou ID do licitante. Lances antigos sem os campos da cadeia de hashes podem ser reportados como `INCOMPLETE`.
-- A cadeia de hashes detecta alterações que não atualizem também a cadeia e as âncoras registradas no banco. Ela não protege contra alguém que consiga reescrever todos esses dados diretamente no próprio banco.
+- A auditoria HMAC exige uma chave independente fora do banco e não certifica históricos antigos. Reescrever valores, cadeia e âncora sem a chave não produz `INTACT`; restaurações completas de snapshots antigos exigem proteção externa adicional.
 - A busca de obras depende da API externa do Art Institute of Chicago e de acesso à internet. Para o WebSocket do frontend, configure `FRONTEND_ORIGIN` com a origem correta.
 
 ## Documentação externa

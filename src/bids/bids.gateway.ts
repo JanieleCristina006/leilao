@@ -13,6 +13,14 @@ import { BidStatus, LotStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { getAllowedFrontendOrigins } from '../common/frontend-origin.js';
 import type { Server, Socket } from 'socket.io';
+import { createHmac } from 'node:crypto';
+import { validateAuditSecret } from './bid-audit.utils.js';
+
+const bidderLabel = (lotId: string, bidderId: string) =>
+  `Licitante ${createHmac('sha256', validateAuditSecret())
+    .update(JSON.stringify(['bidder-label', lotId, bidderId]))
+    .digest('hex')
+    .slice(0, 12)}`;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -145,7 +153,8 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     lotId: string;
     bidId: string;
     bidderId: string;
-    bidderName: string;
+    sequence: number;
+    bidCount: number;
     previousLeaderId: string | null;
     amount: string;
     createdAt: Date;
@@ -154,11 +163,13 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(this.lotRoom(event.lotId)).emit('bid.updated', {
       lotId: event.lotId,
       currentBid: event.amount,
+      bidCount: event.bidCount,
       bid: {
         id: event.bidId,
         amount: event.amount,
         createdAt: event.createdAt.toISOString(),
-        bidderLabel: event.bidderName,
+        sequence: event.sequence,
+        bidderLabel: bidderLabel(event.lotId, event.bidderId),
       },
       endsAt: event.endsAt.toISOString(),
     });
@@ -212,6 +223,7 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         minimumIncrement: true,
         currentBid: true,
         endsAt: true,
+        _count: { select: { bids: true } },
         auction: {
           select: { status: true, startsAt: true },
         },
@@ -223,14 +235,18 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const [history, leader] = await Promise.all([
       this.prisma.bid.findMany({
         where: { lotId, status: BidStatus.ACCEPTED },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [
+          { auditSequence: { sort: 'desc', nulls: 'last' } },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
         take: 50,
         select: {
           id: true,
           bidderId: true,
           amount: true,
           createdAt: true,
-          bidder: { select: { name: true } },
+          auditSequence: true,
         },
       }),
       this.prisma.bid.findFirst({
@@ -251,12 +267,15 @@ export class BidsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentBid: lot.currentBid?.toFixed(2) ?? null,
         startsAt: lot.auction.startsAt.toISOString(),
         endsAt: lot.endsAt.toISOString(),
+        bidCount: lot._count.bids,
       },
       history: history.map((bid) => ({
         id: bid.id,
         amount: bid.amount.toFixed(2),
         createdAt: bid.createdAt.toISOString(),
-        bidderName: bid.bidder.name,
+        sequence: bid.auditSequence,
+        bidderLabel: bidderLabel(lotId, bid.bidderId),
+        bidderName: bidderLabel(lotId, bid.bidderId),
         isMine: bid.bidderId === userId,
       })),
       isLeading: leader?.bidderId === userId,
